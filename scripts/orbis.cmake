@@ -1,0 +1,129 @@
+get_filename_component(_ORBIS_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+
+set(_ORBIS_DEFAULT_BUNDLE_ROOT "${_ORBIS_REPO_ROOT}/third_party/orbis-wine")
+if(DEFINED ENV{ORBIS_WINE_BUNDLE_ROOT} AND NOT "$ENV{ORBIS_WINE_BUNDLE_ROOT}" STREQUAL "")
+  file(TO_CMAKE_PATH "$ENV{ORBIS_WINE_BUNDLE_ROOT}" _ORBIS_DEFAULT_BUNDLE_ROOT)
+endif()
+
+set(ORBIS_WINE_BUNDLE_ROOT
+  "${_ORBIS_DEFAULT_BUNDLE_ROOT}"
+  CACHE PATH
+  "Repo-local bundle containing the Orbis SDK, toolchain, and Wine-hosted packaging tools"
+)
+
+set(ORBIS_SDK_ROOT
+  "${ORBIS_WINE_BUNDLE_ROOT}/sdk/sdk"
+  CACHE PATH
+  "Root directory of the extracted Orbis SDK"
+)
+
+set(ORBIS_TOOLCHAIN_ROOT
+  "${ORBIS_WINE_BUNDLE_ROOT}/toolchain"
+  CACHE PATH
+  "Root directory of the extracted Orbis host toolchain"
+)
+
+set(ORBIS_TOOLCHAIN_BIN
+  "${ORBIS_TOOLCHAIN_ROOT}/sdk/host_tools/bin"
+  CACHE PATH
+  "Directory containing the Orbis host toolchain executables"
+)
+
+set(ORBIS_TARGET_INCLUDE_DIR
+  "${ORBIS_SDK_ROOT}/target/include"
+  CACHE PATH
+  "Primary Orbis target include directory"
+)
+
+set(ORBIS_TARGET_INCLUDE_COMMON_DIR
+  "${ORBIS_SDK_ROOT}/target/include_common"
+  CACHE PATH
+  "Shared Orbis target include directory"
+)
+
+set(ORBIS_TARGET_LIB_DIR
+  "${ORBIS_SDK_ROOT}/target/lib"
+  CACHE PATH
+  "Orbis target library directory"
+)
+
+set(ORBIS_PUB_CMD_EXE
+  "${ORBIS_WINE_BUNDLE_ROOT}/host_tools/bin/orbis-pub-cmd.exe"
+  CACHE FILEPATH
+  "Path to orbis-pub-cmd.exe used to create PS4 packages"
+)
+
+set(_ORBIS_WRAPPER_DIR "${CMAKE_CURRENT_LIST_DIR}/orbis")
+
+foreach(_required_path IN ITEMS
+  "${ORBIS_SDK_ROOT}"
+  "${ORBIS_TOOLCHAIN_ROOT}"
+  "${ORBIS_TOOLCHAIN_BIN}"
+  "${ORBIS_TARGET_INCLUDE_DIR}"
+  "${ORBIS_TARGET_INCLUDE_COMMON_DIR}"
+  "${ORBIS_TARGET_LIB_DIR}"
+  "${_ORBIS_WRAPPER_DIR}/orbis-clang.sh"
+  "${_ORBIS_WRAPPER_DIR}/orbis-clangxx.sh"
+  "${_ORBIS_WRAPPER_DIR}/orbis-link.sh"
+  "${_ORBIS_WRAPPER_DIR}/orbis-ar.sh"
+  "${_ORBIS_WRAPPER_DIR}/orbis-ranlib.sh"
+)
+  if(NOT EXISTS "${_required_path}")
+    message(FATAL_ERROR "Missing Orbis SDK/toolchain path: ${_required_path}")
+  endif()
+endforeach()
+
+set(CMAKE_SYSTEM_NAME Generic)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+set(CMAKE_CROSSCOMPILING TRUE)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
+set(ENV{SCE_ORBIS_SDK_DIR} "${ORBIS_SDK_ROOT}")
+set(ENV{ORBIS_SDK_ROOT} "${ORBIS_SDK_ROOT}")
+set(ENV{ORBIS_TOOLCHAIN_BIN} "${ORBIS_TOOLCHAIN_BIN}")
+
+set(CMAKE_C_COMPILER "${_ORBIS_WRAPPER_DIR}/orbis-clang.sh")
+set(CMAKE_CXX_COMPILER "${_ORBIS_WRAPPER_DIR}/orbis-clangxx.sh")
+set(CMAKE_AR "${_ORBIS_WRAPPER_DIR}/orbis-ar.sh")
+set(CMAKE_RANLIB "${_ORBIS_WRAPPER_DIR}/orbis-ranlib.sh")
+
+set(CMAKE_C_COMPILER_TARGET "x86_64-scei-ps4")
+set(CMAKE_CXX_COMPILER_TARGET "x86_64-scei-ps4")
+set(CMAKE_EXECUTABLE_SUFFIX ".elf")
+
+set(CMAKE_C_STANDARD_INCLUDE_DIRECTORIES
+  "${ORBIS_TARGET_INCLUDE_DIR};${ORBIS_TARGET_INCLUDE_COMMON_DIR}"
+)
+set(CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES
+  "${ORBIS_TARGET_INCLUDE_DIR};${ORBIS_TARGET_INCLUDE_COMMON_DIR}"
+)
+
+set(CMAKE_FIND_ROOT_PATH
+  "${ORBIS_SDK_ROOT}/target"
+  "${ORBIS_TOOLCHAIN_ROOT}/sdk/host_tools"
+)
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+
+set(CMAKE_C_FLAGS_INIT
+  "-fPIC -integrated-as -isystem ${ORBIS_TARGET_INCLUDE_DIR} -isystem ${ORBIS_TARGET_INCLUDE_COMMON_DIR}"
+)
+set(CMAKE_CXX_FLAGS_INIT
+  "-fPIC -integrated-as -isystem ${ORBIS_TARGET_INCLUDE_DIR} -isystem ${ORBIS_TARGET_INCLUDE_COMMON_DIR}"
+)
+set(CMAKE_EXE_LINKER_FLAGS_INIT
+  "-L${ORBIS_TARGET_LIB_DIR}"
+)
+
+set(CMAKE_NINJA_FORCE_RESPONSE_FILE ON)
+set(CMAKE_C_RESPONSE_FILE_LINK_FLAG "@")
+set(CMAKE_CXX_RESPONSE_FILE_LINK_FLAG "@")
+set(CMAKE_C_USE_RESPONSE_FILE_FOR_LIBRARIES ON)
+set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_LIBRARIES ON)
+set(CMAKE_C_USE_RESPONSE_FILE_FOR_LINKING ON)
+set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_LINKING ON)
+set(CMAKE_CXX_LINK_EXECUTABLE
+  "${_ORBIS_WRAPPER_DIR}/orbis-link.sh <FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>"
+)

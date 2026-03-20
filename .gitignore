@@ -1,0 +1,27 @@
+# ORBIS SDK / toolchain bundles
+/third_party/orbis-wine/
+/1.700/
+
+# Local packaging tools
+/PS4_Fake_PKG_Tools_3.87_V7/
+
+# Build output
+/build/
+/build-orbis/
+/cmake-build-*/
+
+# Staged / packaged PS4 artifacts
+*.pkg
+*.gp4
+*.self
+*.elf
+/eboot.bin
+
+# Local crash dumps / reports
+/CUSA00283_*/
+/NPXS*/
+*.orbisdmpmanifest
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
