@@ -170,6 +170,15 @@ EntityRenderer *EntityRenderDispatcher::getRenderer(eINSTANCEOF e)
 
 EntityRenderer *EntityRenderDispatcher::getRenderer(shared_ptr<Entity> e)
 {
+	if (e != NULL && e->GetType() == eTYPE_PLAYER && dynamic_pointer_cast<Player>(e) == NULL)
+	{
+#ifdef __ORBIS__
+		app.DebugPrintf("EntityRenderDispatcher::getRenderer - entityId=%d advertises player type but cast failed ptr=%p\n",
+			e->entityId,
+			e.get());
+#endif
+		return NULL;
+	}
 	return getRenderer(e->GetType());
 }
 

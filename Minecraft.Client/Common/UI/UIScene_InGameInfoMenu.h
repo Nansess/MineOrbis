@@ -11,6 +11,7 @@ private:
 		eControl_GamePlayers,
 	};
 	
+	bool m_bIgnoreInput;
 	bool m_isHostPlayer;
 	int m_playersCount;
 	BYTE m_players[MINECRAFT_NET_MAX_PLAYERS]; // An array of QNet small-id's

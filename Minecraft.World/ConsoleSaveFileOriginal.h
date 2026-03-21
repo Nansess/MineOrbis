@@ -64,6 +64,7 @@ public:
 
 	virtual vector<FileEntry *> *getFilesWithPrefix(const wstring &prefix);
 	virtual vector<FileEntry *> *getRegionFilesByDimension(unsigned int dimensionIndex);
+	virtual bool usesSplitSaves();
 
 #if defined(__PS3__) || defined(__ORBIS__) || defined(__PSVITA__)
 	virtual wstring getPlayerDataFilenameForLoad(const PlayerUID& pUID);

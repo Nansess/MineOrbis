@@ -12,6 +12,7 @@
 #include "HumanoidModel.h"
 #include "Options.h"
 #include "TexturePackRepository.h"
+#include "Common\ProfileModeShim.h"
 #include "StatsCounter.h"
 #include "EntityRenderDispatcher.h"
 #include "TileEntityRenderDispatcher.h"
@@ -68,10 +69,6 @@
 #include "Common\UI\IUIScene_CreativeMenu.h"
 #include "Common\UI\UIFontData.h"
 #include "DLCTexturePack.h"
-
-#ifdef __ORBIS__
-#include "Orbis\Network\PsPlusUpsellWrapper_Orbis.h"
-#endif
 
 // 4J Turning this on will change the graph at the bottom of the debug overlay to show the number of packets of each type added per fram
 //#define DEBUG_RENDER_SHOWS_PACKETS 1
@@ -1128,10 +1125,7 @@ void Minecraft::storeExtraLocalPlayer(int idx)
 	if( localplayers[idx]->input != NULL ) delete localplayers[idx]->input;
 	localplayers[idx]->input = new Input();
 
-	if(ProfileManager.IsSignedIn(idx))
-	{
-		localplayers[idx]->name = convStringToWstring( ProfileManager.GetGamertag(idx) );
-	}
+	localplayers[idx]->name = GameGetLocalDisplayName(idx);
 }
 
 void Minecraft::removeLocalPlayerIdx(int idx)
@@ -1219,7 +1213,7 @@ void Minecraft::createPrimaryLocalPlayer(int iPad)
 	// Give them the gamertag if they're signed in
 	if(ProfileManager.IsSignedIn(ProfileManager.GetPrimaryPad()))
 	{
-		user->name = convStringToWstring( ProfileManager.GetGamertag(ProfileManager.GetPrimaryPad()) );
+		user->name = GameGetLocalDisplayName(ProfileManager.GetPrimaryPad());
 	}
 }
 
@@ -1402,26 +1396,7 @@ void Minecraft::run_middle()
 
 			for( int i = 0; i < XUSER_MAX_COUNT; i++ )
 			{
-#ifdef __ORBIS__
-				if ( m_pPsPlusUpsell != NULL && m_pPsPlusUpsell->hasResponse() && m_pPsPlusUpsell->m_userIndex == i )
-				{
-					delete m_pPsPlusUpsell;
-					m_pPsPlusUpsell = NULL;
-								
-					if ( ProfileManager.HasPlayStationPlus(i) )
-					{
-						app.DebugPrintf("<Minecraft.cpp> Player_%i is now authorised for PsPlus.\n", i);
-						if (!ui.PressStartPlaying(i)) ui.ShowPressStart(i);
-					}
-					else
-					{
-						UINT uiIDA[1] = { IDS_OK };
-						ui.RequestMessageBox( IDS_CANTJOIN_TITLE, IDS_NO_PLAYSTATIONPLUS, uiIDA, 1, i, NULL, NULL, app.GetStringTable() );
-					}
-				}
-				else
-#endif
-					if(localplayers[i])
+				if(localplayers[i])
 				{
 					// 4J-PB - add these to check for coming out of idle
 					if(InputManager.ButtonPressed(i, MINECRAFT_ACTION_JUMP))				localplayers[i]->ullButtonsPressed|=1LL<<MINECRAFT_ACTION_JUMP;
@@ -1550,12 +1525,6 @@ void Minecraft::run_middle()
 										{
 											ui.RequestContentRestrictedMessageBox(IDS_NO_MULTIPLAYER_PRIVILEGE_TITLE, IDS_CONTENT_RESTRICTION, i);
 										}
-										else if(!g_NetworkManager.IsLocalGame() && !ProfileManager.HasPlayStationPlus(i))
-										{
-											m_pPsPlusUpsell = new PsPlusUpsellWrapper(i);
-											m_pPsPlusUpsell->displayUpsell();
-										}
-										else
 #endif
 										if( level->isClientSide )
 										{
@@ -1587,7 +1556,7 @@ void Minecraft::run_middle()
 											shared_ptr<Player> player = localplayers[i];
 											if( player == NULL)
 											{
-												player = createExtraLocalPlayer(i, (convStringToWstring( ProfileManager.GetGamertag(i) )).c_str(), i, level->dimension->id);
+												player = createExtraLocalPlayer(i, GameGetLocalDisplayName(i).c_str(), i, level->dimension->id);
 											}
 										}
 									}
@@ -4724,7 +4693,7 @@ void Minecraft::inGameSignInCheckAllPrivilegesCallback(LPVOID lpParam, bool hasP
 					shared_ptr<Player> player = pClass->localplayers[iPad];
 					if( player == NULL)
 					{
-						player = pClass->createExtraLocalPlayer(iPad, (convStringToWstring( ProfileManager.GetGamertag(iPad) )).c_str(), iPad, pClass->level->dimension->id);
+						player = pClass->createExtraLocalPlayer(iPad, GameGetLocalDisplayName(iPad).c_str(), iPad, pClass->level->dimension->id);
 					}
 				}
 			}
@@ -4778,12 +4747,6 @@ int Minecraft::InGame_SignInReturned(void *pParam,bool bContinue, int iPad)
 				{
 					ui.RequestContentRestrictedMessageBox(IDS_NO_MULTIPLAYER_PRIVILEGE_TITLE, IDS_CONTENT_RESTRICTION, iPad);
 				}
-				else if(!g_NetworkManager.IsLocalGame() && !ProfileManager.HasPlayStationPlus(iPad))
-				{
-					pMinecraftClass->m_pPsPlusUpsell = new PsPlusUpsellWrapper(iPad);
-					pMinecraftClass->m_pPsPlusUpsell->displayUpsell();
-				}
-				else
 #endif
 					if( pMinecraftClass->level->isClientSide )
 					{
@@ -4795,7 +4758,7 @@ int Minecraft::InGame_SignInReturned(void *pParam,bool bContinue, int iPad)
 					shared_ptr<Player> player = pMinecraftClass->localplayers[iPad];
 					if( player == NULL)
 					{
-						player = pMinecraftClass->createExtraLocalPlayer(iPad, (convStringToWstring( ProfileManager.GetGamertag(iPad) )).c_str(), iPad, pMinecraftClass->level->dimension->id);
+						player = pMinecraftClass->createExtraLocalPlayer(iPad, GameGetLocalDisplayName(iPad).c_str(), iPad, pMinecraftClass->level->dimension->id);
 					}
 				}
 			}
@@ -4858,16 +4821,48 @@ unsigned int Minecraft::getCurrentTexturePackId()
 
 ColourTable *Minecraft::getColourTable()
 {
+	static ColourTable *s_lastKnownColourTable = NULL;
+
+	if(skins == NULL)
+	{
+		app.DebugPrintf("Minecraft::getColourTable - skins is NULL\n");
+		return s_lastKnownColourTable;
+	}
+
 	TexturePack *selected = skins->getSelected();
+	if(selected == NULL)
+	{
+		TexturePack *defaultPack = skins->getDefault();
+		app.DebugPrintf("Minecraft::getColourTable - selected is NULL, default=%p\n", defaultPack);
+		ColourTable *defaultColours = defaultPack != NULL ? defaultPack->getColourTable() : NULL;
+		if(defaultColours != NULL)
+		{
+			s_lastKnownColourTable = defaultColours;
+		}
+		return defaultColours != NULL ? defaultColours : s_lastKnownColourTable;
+	}
 
 	ColourTable *colours = selected->getColourTable();
 
 	if(colours == NULL)
 	{
-		colours = skins->getDefault()->getColourTable();
+		TexturePack *defaultPack = skins->getDefault();
+		app.DebugPrintf("Minecraft::getColourTable - selected=%p colourTable=NULL, default=%p\n", selected, defaultPack);
+		colours = defaultPack != NULL ? defaultPack->getColourTable() : NULL;
+		if(colours == NULL)
+		{
+			app.DebugPrintf("Minecraft::getColourTable - default colour table is also NULL\n");
+		}
 	}
 
-	return colours;
+	if(colours != NULL)
+	{
+		s_lastKnownColourTable = colours;
+		return colours;
+	}
+
+	app.DebugPrintf("Minecraft::getColourTable - using cached colour table %p\n", s_lastKnownColourTable);
+	return s_lastKnownColourTable;
 }
 
 #if defined __ORBIS__
@@ -4877,10 +4872,9 @@ int Minecraft::MustSignInReturnedPSN(void *pParam, int iPad, C4JStorage::EMessag
 
     if(result == C4JStorage::EMessage_ResultAccept) 
     {        
-		SQRNetworkManager_Orbis::AttemptPSNSignIn(&Minecraft::InGame_SignInReturned, pMinecraft, false, iPad);
+		Minecraft::InGame_SignInReturned(pMinecraft, true, iPad);
     }
 
     return 0;
 }
 #endif
-

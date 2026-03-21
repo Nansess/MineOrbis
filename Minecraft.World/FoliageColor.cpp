@@ -23,18 +23,30 @@
 
 int FoliageColor::getEvergreenColor()
 {
-	return Minecraft::GetInstance()->getColourTable()->getColor(eMinecraftColour_Foliage_Evergreen);
-	//return 0x619961;
+	Minecraft *minecraft = Minecraft::GetInstance();
+	if(minecraft == NULL || minecraft->getColourTable() == NULL)
+	{
+		return 0x619961;
+	}
+	return minecraft->getColourTable()->getColor(eMinecraftColour_Foliage_Evergreen);
 }
 
 int FoliageColor::getBirchColor()
 {
-	return Minecraft::GetInstance()->getColourTable()->getColor(eMinecraftColour_Foliage_Birch);
-	//return 0x80a755;
+	Minecraft *minecraft = Minecraft::GetInstance();
+	if(minecraft == NULL || minecraft->getColourTable() == NULL)
+	{
+		return 0x80a755;
+	}
+	return minecraft->getColourTable()->getColor(eMinecraftColour_Foliage_Birch);
 }
 
 int FoliageColor::getDefaultColor()
 {
-	return Minecraft::GetInstance()->getColourTable()->getColor(eMinecraftColour_Foliage_Default);
-	//return 0x48b518;
+	Minecraft *minecraft = Minecraft::GetInstance();
+	if(minecraft == NULL || minecraft->getColourTable() == NULL)
+	{
+		return 0x48b518;
+	}
+	return minecraft->getColourTable()->getColor(eMinecraftColour_Foliage_Default);
 }

@@ -1,7 +1,14 @@
-
-
-
 #pragma once
+
+#include <stdint.h>
+#include <string>
+#include <cstddef>
+
+#ifdef __ORBIS__
+#include <net.h>
+#include <np.h>
+#include <user_service.h>
+#endif
 
 
 // Note - there are now 3 types of PlayerUID

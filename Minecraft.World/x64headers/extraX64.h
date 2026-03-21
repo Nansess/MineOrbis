@@ -27,13 +27,41 @@ const int MINECRAFT_NET_MAX_PLAYERS = 8;
 
 
 #ifdef __ORBIS__
-#include <net.h>
-#include <np/np_npid.h>
-#include <user_service.h>
 #include "..\..\Minecraft.Client\Orbis\Orbis_PlayerUID.h"
-#include "..\..\Minecraft.Client\Orbis\Network\SQRNetworkManager_Orbis.h"
-typedef SQRNetworkManager_Orbis::SessionID SessionID;
-typedef SQRNetworkManager_Orbis::PresenceSyncInfo INVITE_INFO;
+struct SessionID
+{
+	unsigned long long m_RoomId;
+	unsigned long long m_ServerId;
+
+	SessionID()
+		: m_RoomId(0)
+		, m_ServerId(0)
+	{
+	}
+};
+
+class INVITE_INFO
+{
+public:
+	GameSessionUID hostPlayerUID;
+	unsigned long long m_RoomId;
+	unsigned long long m_ServerId;
+	unsigned int texturePackParentId;
+	unsigned short netVersion;
+	unsigned char subTexturePackId;
+	bool inviteOnly;
+
+	INVITE_INFO()
+		: hostPlayerUID(0)
+		, m_RoomId(0)
+		, m_ServerId(0)
+		, texturePackParentId(0)
+		, netVersion(0)
+		, subTexturePackId(0)
+		, inviteOnly(false)
+	{
+	}
+};
 
 #elif defined __PS3__		// defined in the profile lib
 #include <np.h>

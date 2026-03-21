@@ -42,6 +42,7 @@
 #include "ClientConstants.h"
 #include "..\Minecraft.World\SoundTypes.h"
 #include "TexturePackRepository.h"
+#include "Common\\Network\\GameNetworkManager.h"
 #ifdef _XBOX
 #include "Common\XUI\XUI_Scene_Trading.h"
 #else
@@ -56,6 +57,52 @@
 #include "..\Minecraft.World\DurangoStats.h"
 #include "..\Minecraft.World\GenericStats.h"
 #endif
+
+namespace
+{
+	bool ClientConnectionTypeActsLikeMob(eINSTANCEOF type)
+	{
+		return
+			type == eTYPE_MOB ||
+			type == eTYPE_VILLAGER ||
+			type == eTYPE_VILLAGERGOLEM ||
+			type == eTYPE_ENDERDRAGON ||
+			(type & eTYPE_ANIMAL) == eTYPE_ANIMAL ||
+			(type & eTYPE_WATERANIMAL) == eTYPE_WATERANIMAL ||
+			(type & eTYPE_MONSTER) == eTYPE_MONSTER;
+	}
+
+	shared_ptr<Mob> ClientConnectionResolveMob(shared_ptr<Entity> entity)
+	{
+		if (entity == NULL) return shared_ptr<Mob>();
+
+		shared_ptr<Mob> mob = dynamic_pointer_cast<Mob>(entity);
+		if (mob != NULL) return mob;
+
+		if (ClientConnectionTypeActsLikeMob(entity->GetType()))
+		{
+			return shared_ptr<Mob>(entity, static_cast<Mob*>(entity.get()));
+		}
+
+		return shared_ptr<Mob>();
+	}
+
+	shared_ptr<Slime> ClientConnectionResolveSlime(shared_ptr<Mob> mob)
+	{
+		if (mob == NULL) return shared_ptr<Slime>();
+
+		shared_ptr<Slime> slime = dynamic_pointer_cast<Slime>(mob);
+		if (slime != NULL) return slime;
+
+		eINSTANCEOF type = mob->GetType();
+		if (type == eTYPE_SLIME || type == eTYPE_LAVASLIME)
+		{
+			return shared_ptr<Slime>(mob, static_cast<Slime*>(mob.get()));
+		}
+
+		return shared_ptr<Slime>();
+	}
+}
 
 ClientConnection::ClientConnection(Minecraft *minecraft, const wstring& ip, int port)
 {
@@ -468,9 +515,23 @@ void ClientConnection::handleAddEntity(shared_ptr<AddEntityPacket> packet)
 			int ix=(int) x;
 			int iy=(int) y;
 			int iz = (int) z;
-		app.DebugPrintf("ClientConnection ITEM_FRAME xyz %d,%d,%d\n",ix,iy,iz);
+			app.DebugPrintf("ClientConnection ITEM_FRAME xyz %d,%d,%d\n",ix,iy,iz);
+#ifdef __ORBIS__
+			if(g_NetworkManager.IsNetworkThreadRunning())
+			{
+				app.DebugPrintf("Skipping ITEM_FRAME add during Orbis network-thread startup at %d,%d,%d dir=%d\n", ix, iy, iz, packet->data);
+				packet->data = -1;
+				return;
+			}
+#endif
 		}
+#ifdef __ORBIS__
+		app.DebugPrintf("ClientConnection ITEM_FRAME constructing dir=%d packetId=%d\n", packet->data, packet->id);
+#endif
  		e = shared_ptr<Entity>(new ItemFrame(level, (int) x, (int) y, (int) z, packet->data));
+#ifdef __ORBIS__
+		app.DebugPrintf("ClientConnection ITEM_FRAME constructed ptr=%p packetId=%d\n", e.get(), packet->id);
+#endif
  		packet->data = 0;
  		setRot = false;
  		break;
@@ -628,7 +689,13 @@ void ClientConnection::handleAddEntity(shared_ptr<AddEntityPacket> packet)
 			e->absMoveTo(x,y,z,yRot,xRot);
 		}
         e->entityId = packet->id;
+#ifdef __ORBIS__
+		app.DebugPrintf("ClientConnection handleAddEntity before putEntity type=%d id=%d ptr=%p\n", packet->type, packet->id, e.get());
+#endif
         level->putEntity(packet->id, e);
+#ifdef __ORBIS__
+		app.DebugPrintf("ClientConnection handleAddEntity after putEntity type=%d id=%d ptr=%p\n", packet->type, packet->id, e.get());
+#endif
 
         if (packet->data > -1) // 4J - changed "no data" value to be -1, we can have a valid entity id of 0
 		{
@@ -653,11 +720,12 @@ void ClientConnection::handleAddEntity(shared_ptr<AddEntityPacket> packet)
 					}
 				}
 
-                if (dynamic_pointer_cast<Mob>(owner) != NULL)
-				{
-                    dynamic_pointer_cast<Arrow>(e)->owner = dynamic_pointer_cast<Mob>(owner);
-                }
-            }
+					shared_ptr<Mob> ownerMob = ClientConnectionResolveMob(owner);
+	                if (ownerMob != NULL)
+					{
+	                    dynamic_pointer_cast<Arrow>(e)->owner = ownerMob;
+	                }
+	            }
 
             e->lerpMotion(packet->xa / 8000.0, packet->ya / 8000.0, packet->za / 8000.0);	
         }
@@ -698,6 +766,14 @@ void ClientConnection::handleAddGlobalEntity(shared_ptr<AddGlobalEntityPacket> p
 
 void ClientConnection::handleAddPainting(shared_ptr<AddPaintingPacket> packet)
 {
+#ifdef __ORBIS__
+	if(g_NetworkManager.IsNetworkThreadRunning())
+	{
+		app.DebugPrintf("Skipping PAINTING add during Orbis network-thread startup at %d,%d,%d dir=%d motive=%ls\n",
+			packet->x, packet->y, packet->z, packet->dir, packet->motive.c_str());
+		return;
+	}
+#endif
     shared_ptr<Painting> painting = shared_ptr<Painting>( new Painting(level, packet->x, packet->y, packet->z, packet->dir, packet->motive) );
     level->putEntity(packet->id, painting);
 }
@@ -1192,7 +1268,7 @@ void ClientConnection::send(shared_ptr<Packet> packet)
 void ClientConnection::handleTakeItemEntity(shared_ptr<TakeItemEntityPacket> packet)
 {
     shared_ptr<Entity> from = getEntity(packet->itemId);
-    shared_ptr<Mob> to = dynamic_pointer_cast<Mob>(getEntity(packet->playerId));
+	    shared_ptr<Mob> to = ClientConnectionResolveMob(getEntity(packet->playerId));
 
 	// 4J - the original game could assume that if getEntity didn't find the player, it must be the local player. We
 	// need to search all local players
@@ -1596,6 +1672,12 @@ void ClientConnection::handleEntityActionAtPosition(shared_ptr<EntityActionAtPos
     if (packet->action == EntityActionAtPositionPacket::START_SLEEP)
 	{
         shared_ptr<Player> player = dynamic_pointer_cast<Player>(e);
+		if (player == NULL)
+		{
+			app.DebugPrintf("ClientConnection::handleEntityActionAtPosition - entity %d action %d expected Player but got type %d\n",
+				packet->id, packet->action, e->GetType());
+			return;
+		}
         player->startSleepInBed(packet->x, packet->y, packet->z);
 
 		if( player == minecraft->localplayers[m_userIndex] )
@@ -2092,13 +2174,79 @@ void ClientConnection::close()
 
 void ClientConnection::handleAddMob(shared_ptr<AddMobPacket> packet)
 {
+	if(level == NULL)
+	{
+		app.DebugPrintf("ClientConnection::handleAddMob - ignoring entityId=%d packetType=%d because level is NULL\n",
+			packet->id,
+			packet->type);
+		return;
+	}
+
 	double x = packet->x / 32.0;
 	double y = packet->y / 32.0;
 	double z = packet->z / 32.0;
 	float yRot = packet->yRot * 360 / 256.0f;
 	float xRot = packet->xRot * 360 / 256.0f;
 
-	shared_ptr<Mob> mob = dynamic_pointer_cast<Mob>(EntityIO::newById(packet->type, level));
+	shared_ptr<Entity> spawnedEntity = EntityIO::newById(packet->type, level);
+		shared_ptr<Mob> mob = dynamic_pointer_cast<Mob>(spawnedEntity);
+		if(mob == NULL && spawnedEntity != NULL)
+		{
+			eINSTANCEOF spawnedType = spawnedEntity->GetType();
+			if(ClientConnectionTypeActsLikeMob(spawnedType))
+			{
+				app.DebugPrintf("ClientConnection::handleAddMob - RTTI cast failed, forcing mob spawn entityId=%d packetType=%d rawPtr=%p rawType=%d\n",
+					packet->id,
+				packet->type,
+				spawnedEntity.get(),
+				spawnedType);
+
+				// The network packet is authoritative that this should be a mob spawn.
+				// Some Orbis builds are producing a valid mob instance whose RTTI cast
+				// still fails here, so fall back to the game's own type enum.
+				mob = ClientConnectionResolveMob(spawnedEntity);
+			}
+		}
+	if(mob == NULL)
+	{
+		shared_ptr<Entity> existing = level->getEntity(packet->id);
+		int localPlayerId = -1;
+		if(minecraft != NULL && minecraft->localplayers[m_userIndex] != NULL)
+		{
+			localPlayerId = minecraft->localplayers[m_userIndex]->entityId;
+		}
+
+		wstring entityName = EntityIO::getEncodeId(packet->type);
+		app.DebugPrintf("ClientConnection::handleAddMob - unsupported spawn entityId=%d packetType=%d name=%ls rawPtr=%p rawType=%d existingPtr=%p existingType=%d localPlayerId=%d pos=%f,%f,%f\n",
+			packet->id,
+			packet->type,
+			entityName.empty() ? L"<unknown>" : entityName.c_str(),
+			spawnedEntity.get(),
+			spawnedEntity != NULL ? spawnedEntity->GetType() : eTYPE_NOTSET,
+			existing.get(),
+			existing != NULL ? existing->GetType() : eTYPE_NOTSET,
+			localPlayerId,
+			x,
+			y,
+			z);
+
+		// Drop stale non-local entities for IDs we cannot materialize so later packets do
+		// not keep driving an incompatible object graph.
+		if(existing != NULL && packet->id != localPlayerId)
+		{
+			shared_ptr<Entity> removed = level->removeEntity(packet->id);
+			if(removed != NULL)
+			{
+				app.DebugPrintf("ClientConnection::handleAddMob - removed stale entityId=%d type=%d ptr=%p after unsupported spawn\n",
+					packet->id,
+					removed->GetType(),
+					removed.get());
+			}
+		}
+
+		return;
+	}
+
 	mob->xp = packet->x;
 	mob->yp = packet->y;
 	mob->zp = packet->z;
@@ -2135,13 +2283,16 @@ void ClientConnection::handleAddMob(shared_ptr<AddMobPacket> packet)
 	}
 
 	// Fix for #65236 - TU8: Content: Gameplay: Magma Cubes' have strange hit boxes.
-	// 4J Stu - Slimes have a different BB depending on their size which is set in the entity data, so update the BB
-	if(mob->GetType() == eTYPE_SLIME || mob->GetType() == eTYPE_LAVASLIME)
-	{
-		shared_ptr<Slime> slime = dynamic_pointer_cast<Slime>(mob);
-		slime->setSize( slime->getSize() );
+		// 4J Stu - Slimes have a different BB depending on their size which is set in the entity data, so update the BB
+		if(mob->GetType() == eTYPE_SLIME || mob->GetType() == eTYPE_LAVASLIME)
+		{
+			shared_ptr<Slime> slime = ClientConnectionResolveSlime(mob);
+			if (slime != NULL)
+			{
+				slime->setSize(slime->getSize());
+			}
+		}
 	}
-}
 
 void ClientConnection::handleSetTime(shared_ptr<SetTimePacket> packet)
 {
@@ -2313,7 +2464,12 @@ void ClientConnection::handleTextureChange(shared_ptr<TextureChangePacket> packe
 	shared_ptr<Entity> e = getEntity(packet->id);
     if (e == NULL) return;
 	shared_ptr<Player> player = dynamic_pointer_cast<Player>(e);
-	if( e == NULL) return;
+	if( player == NULL)
+	{
+		app.DebugPrintf("ClientConnection::handleTextureChange - entity %d expected Player but got type %d\n",
+			packet->id, e->GetType());
+		return;
+	}
 
 	bool isLocalPlayer = false;
 	for( int i = 0; i < XUSER_MAX_COUNT; i++ )
@@ -2368,7 +2524,12 @@ void ClientConnection::handleTextureAndGeometryChange(shared_ptr<TextureAndGeome
 	shared_ptr<Entity> e = getEntity(packet->id);
 	if (e == NULL) return;
 	shared_ptr<Player> player = dynamic_pointer_cast<Player>(e);
-	if( e == NULL) return;
+	if( player == NULL)
+	{
+		app.DebugPrintf("ClientConnection::handleTextureAndGeometryChange - entity %d expected Player but got type %d\n",
+			packet->id, e->GetType());
+		return;
+	}
 
 	bool isLocalPlayer = false;
 	for( int i = 0; i < XUSER_MAX_COUNT; i++ )
@@ -2953,21 +3114,23 @@ void ClientConnection::handleAwardStat(shared_ptr<AwardStatPacket> packet)
 	minecraft->localplayers[m_userIndex]->awardStatFromServer(GenericStats::stat(packet->statId), packet->getParamData());
 }
 
-void ClientConnection::handleUpdateMobEffect(shared_ptr<UpdateMobEffectPacket> packet)
-{
-	shared_ptr<Entity> e = getEntity(packet->entityId);
-	if (e == NULL || dynamic_pointer_cast<Mob>(e) == NULL) return;
+	void ClientConnection::handleUpdateMobEffect(shared_ptr<UpdateMobEffectPacket> packet)
+	{
+		shared_ptr<Entity> e = getEntity(packet->entityId);
+		shared_ptr<Mob> mob = ClientConnectionResolveMob(e);
+		if (mob == NULL) return;
 
-	( dynamic_pointer_cast<Mob>(e) )->addEffect(new MobEffectInstance(packet->effectId, packet->effectDurationTicks, packet->effectAmplifier));
-}
+		mob->addEffect(new MobEffectInstance(packet->effectId, packet->effectDurationTicks, packet->effectAmplifier));
+	}
 
-void ClientConnection::handleRemoveMobEffect(shared_ptr<RemoveMobEffectPacket> packet)
-{
-	shared_ptr<Entity> e = getEntity(packet->entityId);
-	if (e == NULL || dynamic_pointer_cast<Mob>(e) == NULL) return;
+	void ClientConnection::handleRemoveMobEffect(shared_ptr<RemoveMobEffectPacket> packet)
+	{
+		shared_ptr<Entity> e = getEntity(packet->entityId);
+		shared_ptr<Mob> mob = ClientConnectionResolveMob(e);
+		if (mob == NULL) return;
 
-	( dynamic_pointer_cast<Mob>(e) )->removeEffectNoUpdate(packet->effectId);
-}
+		mob->removeEffectNoUpdate(packet->effectId);
+	}
 
 bool ClientConnection::isServerPacketListener()
 {
@@ -2990,17 +3153,66 @@ void ClientConnection::handlePlayerInfo(shared_ptr<PlayerInfoPacket> packet)
 	// 4J Stu - Repurposed this packet for player info that we want
 	app.UpdatePlayerInfo(packet->m_networkSmallId, packet->m_playerColourIndex, packet->m_playerPrivileges);
 
-	shared_ptr<Entity> entity = getEntity(packet->m_entityId);
-	if(entity != NULL && entity->GetType() == eTYPE_PLAYER)
+	shared_ptr<MultiplayerLocalPlayer> localPlayer = minecraft->localplayers[m_userIndex];
+	int localPlayerId = localPlayer != NULL ? localPlayer->entityId : -1;
+	if(localPlayer != NULL && packet->m_entityId == localPlayerId)
 	{
-		shared_ptr<Player> player = dynamic_pointer_cast<Player>(entity);
-		if(player != NULL)
+		if(level != NULL)
 		{
-			player->setPlayerGamePrivilege(Player::ePlayerGamePrivilege_All, packet->m_playerPrivileges);
+			shared_ptr<Entity> mappedEntity = level->getEntity(packet->m_entityId);
+			if(mappedEntity != NULL && mappedEntity.get() != localPlayer.get())
+			{
+				app.DebugPrintf("ClientConnection::handlePlayerInfo - repairing local player mapping for entity %d staleType=%d stalePtr=%p localPtr=%p\n",
+					packet->m_entityId,
+					mappedEntity->GetType(),
+					mappedEntity.get(),
+					localPlayer.get());
+
+				shared_ptr<Entity> removed = level->removeEntity(packet->m_entityId);
+				if(removed != NULL)
+				{
+					app.DebugPrintf("ClientConnection::handlePlayerInfo - removed stale local player mapping %d type=%d ptr=%p\n",
+						packet->m_entityId,
+						removed->GetType(),
+						removed.get());
+				}
+			}
 		}
-		else
+
+		localPlayer->setPlayerGamePrivilege(Player::ePlayerGamePrivilege_All, packet->m_playerPrivileges);
+	}
+	else
+	{
+		shared_ptr<Entity> entity = getEntity(packet->m_entityId);
+		if(entity != NULL && entity->GetType() == eTYPE_PLAYER)
 		{
-			app.DebugPrintf("ClientConnection::handlePlayerInfo - entity %d reported as player but cast failed\n", packet->m_entityId);
+			shared_ptr<Player> player = dynamic_pointer_cast<Player>(entity);
+			if(player != NULL)
+			{
+				player->setPlayerGamePrivilege(Player::ePlayerGamePrivilege_All, packet->m_playerPrivileges);
+			}
+			else
+			{
+				app.DebugPrintf("ClientConnection::handlePlayerInfo - entity %d reported as player but cast failed type=%d ptr=%p localPlayerId=%d\n",
+					packet->m_entityId,
+					entity->GetType(),
+					entity.get(),
+					localPlayerId);
+
+				// Quarantine the inconsistent entity so later player-only paths do not
+				// route it into PlayerRenderer or privilege updates and crash.
+				if(level != NULL && packet->m_entityId != localPlayerId)
+				{
+					shared_ptr<Entity> removed = level->removeEntity(packet->m_entityId);
+					if(removed != NULL)
+					{
+						app.DebugPrintf("ClientConnection::handlePlayerInfo - removed inconsistent entity %d type=%d ptr=%p\n",
+							packet->m_entityId,
+							removed->GetType(),
+							removed.get());
+					}
+				}
+			}
 		}
 	}
 	if(networkPlayer != NULL && networkPlayer->IsLocal())

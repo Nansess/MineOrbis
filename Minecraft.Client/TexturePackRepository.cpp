@@ -255,8 +255,19 @@ vector<TexturePack *> *TexturePackRepository::getAll()
 
 TexturePack *TexturePackRepository::getSelected()
 {
-	if(selected->hasData())	return selected;
-	else return DEFAULT_TEXTURE_PACK;
+	if(selected == NULL)
+	{
+		app.DebugPrintf("TexturePackRepository::getSelected - selected is NULL, default=%p\n", DEFAULT_TEXTURE_PACK);
+		return DEFAULT_TEXTURE_PACK;
+	}
+
+	if(selected->hasData())
+	{
+		return selected;
+	}
+
+	app.DebugPrintf("TexturePackRepository::getSelected - selected %p has no data, default=%p\n", selected, DEFAULT_TEXTURE_PACK);
+	return DEFAULT_TEXTURE_PACK;
 }
 
 bool TexturePackRepository::shouldPromptForWebSkin()

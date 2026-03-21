@@ -113,11 +113,6 @@ SQRNetworkPlayer::SQRNetworkPlayer(SQRNetworkManager *manager, eSQRNetworkPlayer
 
 SQRNetworkPlayer::~SQRNetworkPlayer()
 {
-#ifdef __ORBIS__
-	SQRNetworkManager_Orbis* pMan = (SQRNetworkManager_Orbis*)m_manager;
-// 	pMan->removePlayerFromVoiceChat(this);
-// 	m_roomMemberId = -1;
-#endif
 	DeleteCriticalSection(&m_csQueue);
 }
 

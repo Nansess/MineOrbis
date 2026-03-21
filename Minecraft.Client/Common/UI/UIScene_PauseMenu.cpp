@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "UI.h"
 #include "UIScene_PauseMenu.h"
+#include "..\ProfileModeShim.h"
 #include "..\..\MinecraftServer.h"
 #include "..\..\MultiplayerLocalPlayer.h"
 #include "..\..\TexturePackRepository.h"
@@ -180,9 +181,11 @@ void UIScene_PauseMenu::tick()
 #endif
 }
 
+#include "..\ProfileModeShim.h"
+
 void UIScene_PauseMenu::updateTooltips()
 {
-	bool bUserisClientSide = ProfileManager.IsSignedInLive(m_iPad);
+	bool bUserisClientSide = GameIsSignedInLive(m_iPad);
 	bool bIsisPrimaryHost=g_NetworkManager.IsHost() && (ProfileManager.GetPrimaryPad()==m_iPad);
 
 #ifdef _XBOX_ONE
@@ -418,11 +421,11 @@ void UIScene_PauseMenu::handleInput(int iPad, int key, bool repeat, bool pressed
 #endif
 
 			// Are we offline?
-			if(!ProfileManager.IsSignedInLive(iPad))
+			if(!GameIsSignedInLive(iPad))
 			{
 				m_eAction=eAction_ViewInvitesPSN;
 #ifdef __ORBIS__
-				int npAvailability = ProfileManager.getNPAvailability(iPad);
+				int npAvailability = GameGetNPAvailability(iPad);
 				if (npAvailability == SCE_NP_ERROR_AGE_RESTRICTION)
 				{
 					// 4J Stu - This is a bit messy and is due to the library incorrectly returning false for IsSignedInLive is the npAvailability isn't SCE_OK
@@ -458,7 +461,7 @@ void UIScene_PauseMenu::handleInput(int iPad, int key, bool repeat, bool pressed
 				else
 				{
 #ifdef __ORBIS__
-					SQRNetworkManager_Orbis::RecvInviteGUI();
+					m_bIgnoreInput = false;
 #else // __PS3__
 					int ret = sceNpBasicRecvMessageCustom(SCE_NP_BASIC_MESSAGE_MAIN_TYPE_INVITE, SCE_NP_BASIC_RECV_MESSAGE_OPTIONS_INCLUDE_BOOTABLE, SYS_MEMORY_CONTAINER_ID_INVALID);
 					app.DebugPrintf("sceNpBasicRecvMessageCustom return %d ( %08x )\n", ret, ret);
@@ -526,7 +529,7 @@ void UIScene_PauseMenu::handlePress(F64 controlId, F64 childId)
 			{
 				ui.RequestMessageBox(IDS_PRO_GUESTPROFILE_TITLE, IDS_PRO_GUESTPROFILE_TEXT, uiIDA, 1, ProfileManager.GetPrimaryPad(),NULL,NULL, app.GetStringTable(), NULL, 0, false);
 			}
-			else if(!ProfileManager.IsSignedInLive(m_iPad))
+			else if(!GameIsSignedInLive(m_iPad))
 			{
 #ifdef __ORBIS__
 				// If a patch is available, can't show leaderboard
@@ -534,7 +537,7 @@ void UIScene_PauseMenu::handlePress(F64 controlId, F64 childId)
 
 				// Check for content restricted user
 				// Update error code
-				int errorCode = ProfileManager.getNPAvailability(m_iPad);
+				int errorCode = GameGetNPAvailability(m_iPad);
 
 				// Check if PSN is unavailable because of age restriction
 				if (errorCode == SCE_NP_ERROR_AGE_RESTRICTION)
@@ -556,7 +559,7 @@ void UIScene_PauseMenu::handlePress(F64 controlId, F64 childId)
 				ui.RequestMessageBox(IDS_PRO_NOTONLINE_TITLE, IDS_PRO_XBOXLIVE_NOTIFICATION, uiIDA, 1, ProfileManager.GetPrimaryPad(),&UIScene_PauseMenu::MustSignInReturnedPSN,this, app.GetStringTable(), NULL, 0, false);
 #elif defined(__ORBIS__)
 				m_eAction=eAction_ViewLeaderboardsPSN;
-				int npAvailability = ProfileManager.getNPAvailability(m_iPad);
+				int npAvailability = GameGetNPAvailability(m_iPad);
 				if (npAvailability == SCE_NP_ERROR_AGE_RESTRICTION)
 				{
 					// 4J Stu - This is a bit messy and is due to the library incorrectly returning false for IsSignedInLive is the npAvailability isn't SCE_OK
@@ -786,7 +789,7 @@ void UIScene_PauseMenu::PerformActionSaveGame()
 #endif
 
 		// Unlock the full version?
-		if(!ProfileManager.IsSignedInLive(m_iPad))
+		if(!GameIsSignedInLive(m_iPad))
 		{
 #if defined(__PS3__)
 			m_eAction=eAction_SaveGamePSN;
@@ -796,7 +799,7 @@ void UIScene_PauseMenu::PerformActionSaveGame()
 			ui.RequestMessageBox(IDS_PRO_NOTONLINE_TITLE, IDS_PRO_XBOXLIVE_NOTIFICATION, uiIDA, 2, ProfileManager.GetPrimaryPad(),&UIScene_PauseMenu::MustSignInReturnedPSN,this, app.GetStringTable(), NULL, 0, false);
 #elif defined(__ORBIS__)
 			m_eAction=eAction_SaveGamePSN;
-			int npAvailability = ProfileManager.getNPAvailability(m_iPad);
+			int npAvailability = GameGetNPAvailability(m_iPad);
 			if (npAvailability == SCE_NP_ERROR_AGE_RESTRICTION)
 			{
 				// 4J Stu - This is a bit messy and is due to the library incorrectly returning false for IsSignedInLive is the npAvailability isn't SCE_OK
@@ -985,7 +988,7 @@ int UIScene_PauseMenu::UnlockFullSaveReturned(void *pParam,int iPad,C4JStorage::
 
 	if(result==C4JStorage::EMessage_ResultAccept)
 	{
-		if(ProfileManager.IsSignedInLive(pMinecraft->player->GetXboxPad()))
+		if(GameIsSignedInLive(pMinecraft->player->GetXboxPad()))
 		{
 			// 4J-PB - need to check this user can access the store
 #if defined(__PS3__) || defined(__PSVITA__)
@@ -1085,16 +1088,16 @@ int UIScene_PauseMenu::MustSignInReturnedPSN(void *pParam,int iPad,C4JStorage::E
 		switch(pClass->m_eAction)
 		{
 		case eAction_ViewLeaderboardsPSN:
-			SQRNetworkManager_Orbis::AttemptPSNSignIn(&UIScene_PauseMenu::ViewLeaderboards_SignInReturned, pClass, false, iPad);
+			UIScene_PauseMenu::ViewLeaderboards_SignInReturned(pClass, true, iPad);
 			break;
 		case eAction_ViewInvitesPSN:
-			SQRNetworkManager_Orbis::AttemptPSNSignIn(&UIScene_PauseMenu::ViewInvites_SignInReturned, pClass, false, iPad);
+			UIScene_PauseMenu::ViewInvites_SignInReturned(pClass, true, iPad);
 			break;
 		case eAction_SaveGamePSN:
-			SQRNetworkManager_Orbis::AttemptPSNSignIn(&UIScene_PauseMenu::SaveGame_SignInReturned, pClass, false, iPad);
+			UIScene_PauseMenu::SaveGame_SignInReturned(pClass, true, iPad);
 			break;
 		case eAction_BuyTexturePackPSN:
-			SQRNetworkManager_Orbis::AttemptPSNSignIn(&UIScene_PauseMenu::BuyTexturePack_SignInReturned, pClass, false, iPad);
+			UIScene_PauseMenu::BuyTexturePack_SignInReturned(pClass, true, iPad);
 			break;
 		}
 #endif
@@ -1117,7 +1120,7 @@ int UIScene_PauseMenu::ViewLeaderboards_SignInReturned(void *pParam,bool bContin
 		{
 			ui.RequestMessageBox(IDS_PRO_GUESTPROFILE_TITLE, IDS_PRO_GUESTPROFILE_TEXT, uiIDA, 1, ProfileManager.GetPrimaryPad(),NULL,NULL, app.GetStringTable(), NULL, 0, false);
 		}
-		else if(ProfileManager.IsSignedInLive(iPad))
+		else if(GameIsSignedInLive(iPad))
 		{
 #ifndef __ORBIS__
 			bool bContentRestricted=false;
@@ -1150,11 +1153,11 @@ int UIScene_PauseMenu::WarningTrialTexturePackReturned(void *pParam,int iPad,C4J
 #if defined(__PS3__) || defined(__ORBIS__) || defined(__PSVITA__)
 	if(result==C4JStorage::EMessage_ResultAccept)
 	{
-		if(!ProfileManager.IsSignedInLive(iPad))
+		if(!GameIsSignedInLive(iPad))
 		{
 			pClass->m_eAction=eAction_SaveGamePSN;
 #ifdef __ORBIS__// Check if PSN is unavailable because of age restriction
-			int npAvailability = ProfileManager.getNPAvailability(iPad);
+			int npAvailability = GameGetNPAvailability(iPad);
 			if (npAvailability == SCE_NP_ERROR_AGE_RESTRICTION)
 			{
 				// 4J Stu - This is a bit messy and is due to the library incorrectly returning false for IsSignedInLive is the npAvailability isn't SCE_OK
@@ -1264,7 +1267,7 @@ int UIScene_PauseMenu::BuyTexturePack_SignInReturned(void *pParam,bool bContinue
 	if(bContinue==true)
 	{
 		// Check if we're signed in to LIVE
-		if(ProfileManager.IsSignedInLive(iPad))
+		if(GameIsSignedInLive(iPad))
 		{
 #if defined(__PS3__) || defined(__ORBIS__) || defined(__PSVITA__)
 
@@ -1342,10 +1345,10 @@ int UIScene_PauseMenu::ViewInvites_SignInReturned(void *pParam,bool bContinue, i
 	if(bContinue==true)
 	{
 		// Check if we're signed in to LIVE
-		if(ProfileManager.IsSignedInLive(iPad))
+		if(GameIsSignedInLive(iPad))
 		{
 #ifdef __ORBIS__
-			SQRNetworkManager_Orbis::RecvInviteGUI();
+			return 0;
 #elif defined __PS3__
 			int ret = sceNpBasicRecvMessageCustom(SCE_NP_BASIC_MESSAGE_MAIN_TYPE_INVITE, SCE_NP_BASIC_RECV_MESSAGE_OPTIONS_INCLUDE_BOOTABLE, SYS_MEMORY_CONTAINER_ID_INVALID);
 			app.DebugPrintf("sceNpBasicRecvMessageCustom return %d ( %08x )\n", ret, ret);
@@ -1459,7 +1462,7 @@ void UIScene_PauseMenu::HandleDLCLicenseChange()
 #ifdef __ORBIS__
 bool UIScene_PauseMenu::CheckForPatch()
 {
-	int npAvailability = ProfileManager.getNPAvailability(ProfileManager.GetPrimaryPad());
+	int npAvailability = GameGetNPAvailability(ProfileManager.GetPrimaryPad());
 
 	bool bPatchAvailable;
 	switch(npAvailability)

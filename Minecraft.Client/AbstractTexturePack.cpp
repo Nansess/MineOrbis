@@ -254,10 +254,12 @@ void AbstractTexturePack::loadDefaultColourTable()
 {
 	// Load the file
 	File coloursFile(AbstractTexturePack::getPath(true).append(L"res/colours.col"));
+	app.DebugPrintf("AbstractTexturePack::loadDefaultColourTable - path=%ls\n", coloursFile.getPath().c_str());
 
 	if(coloursFile.exists())
 	{
 		DWORD dwLength = coloursFile.length();
+		app.DebugPrintf("AbstractTexturePack::loadDefaultColourTable - exists, length=%u\n", dwLength);
 		byteArray data(dwLength);
 
 		FileInputStream fis(coloursFile);
@@ -270,7 +272,7 @@ void AbstractTexturePack::loadDefaultColourTable()
 	}
 	else
 	{
-		app.DebugPrintf("Failed to load the default colours table\n");
+		app.DebugPrintf("AbstractTexturePack::loadDefaultColourTable - FAILED path=%ls\n", coloursFile.getPath().c_str());
 		app.FatalLoadError();
 	}
 }

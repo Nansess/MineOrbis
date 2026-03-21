@@ -40,6 +40,7 @@
 #include "..\Minecraft.World\SparseLightStorage.h"
 #include "..\Minecraft.World\SparseDataStorage.h"
 #include "..\Minecraft.World\compression.h"
+#include "..\Minecraft.World\File.h"
 #ifdef _XBOX
 #include "Common\XUI\XUI_DebugSetCamera.h"
 #endif
@@ -63,6 +64,73 @@ bool	MinecraftServer::s_bSaveOnExitAnswered=false;
 int MinecraftServer::s_slowQueuePlayerIndex = 0;
 int MinecraftServer::s_slowQueueLastTime = 0;
 bool MinecraftServer::s_slowQueuePacketSent = false;
+
+static bool ShouldUseSplitSavesForPlatform(ESavePlatform platform)
+{
+#ifdef SPLIT_SAVES
+	return platform == SAVE_FILE_PLATFORM_XBONE;
+#else
+	(void)platform;
+	return false;
+#endif
+}
+
+#ifdef __ORBIS__
+static std::string GetOrbisSaveFilenameForLookup(const std::wstring &saveName)
+{
+	std::string fileName = wstringtofilename(saveName);
+	if(fileName.empty())
+	{
+		return fileName;
+	}
+
+	if(fileName.rfind(".mcs") == std::string::npos)
+	{
+		fileName.append(".mcs");
+	}
+
+	return fileName;
+}
+
+static bool HasOrbisSplitSaveParts(const std::wstring &saveName)
+{
+#ifdef SPLIT_SAVES
+	std::string fileName = GetOrbisSaveFilenameForLookup(saveName);
+	if(fileName.empty())
+	{
+		return false;
+	}
+
+	std::string partsPath = std::string("Saves\\").append(fileName).append(".parts");
+	File partsDir(filenametowstring(partsPath.c_str()));
+	return partsDir.exists() && partsDir.isDirectory();
+#else
+	(void)saveName;
+	return false;
+#endif
+}
+
+static ConsoleSaveFile *CreateOrbisRawSaveFile(const std::wstring &saveName, LPVOID pvSaveData, DWORD fileSize, ESavePlatform plat)
+{
+#ifdef SPLIT_SAVES
+	const bool hasSplitParts = HasOrbisSplitSaveParts(saveName);
+	app.DebugPrintf("MinecraftServer::CreateOrbisRawSaveFile - save=%S splitParts=%s fileSize=%u\n",
+		saveName.c_str(), hasSplitParts ? "yes" : "no", (unsigned int)fileSize);
+
+	if(hasSplitParts)
+	{
+		// Split saves keep their region data in a sibling .parts directory, so let the split-save
+		// loader read directly from disk instead of treating the header blob as a monolithic save.
+		return new ConsoleSaveFileSplit(saveName, NULL, 0, false, plat);
+	}
+#else
+	app.DebugPrintf("MinecraftServer::CreateOrbisRawSaveFile - save=%S splitParts=no fileSize=%u\n",
+		saveName.c_str(), (unsigned int)fileSize);
+#endif
+
+	return new ConsoleSaveFileOriginal(saveName, pvSaveData, fileSize, false, plat);
+}
+#endif
 
 unordered_map<wstring, int> MinecraftServer::ironTimers;
 
@@ -261,7 +329,7 @@ bool MinecraftServer::initServer(__int64 seed, NetworkGameInitData *initData, DW
 		// 4J delete passed in save data now - this is only required for the tutorial which is loaded by passing data directly in rather than using the storage manager
 		if( initData->saveData )
 		{
-			delete initData->saveData->data;
+			delete [] reinterpret_cast<byte *>(initData->saveData->data);
 			initData->saveData->data = 0;
 			initData->saveData->fileSize = 0;
 		}
@@ -401,13 +469,27 @@ bool MinecraftServer::loadLevel(LevelStorageSource *storageSource, const wstring
 	{
 		// We are loading a file from disk with the data passed in
 
-#ifdef SPLIT_SAVES		
-		ConsoleSaveFileOriginal oldFormatSave( initData->saveData->saveName, initData->saveData->data, initData->saveData->fileSize, false, initData->savePlatform );
-		ConsoleSaveFile* pSave = new ConsoleSaveFileSplit( &oldFormatSave );
-		
-		//ConsoleSaveFile* pSave = new ConsoleSaveFileSplit( initData->saveData->saveName, initData->saveData->data, initData->saveData->fileSize, false, initData->savePlatform );
+#if defined(SPLIT_SAVES)
+		ConsoleSaveFile* pSave = NULL;
+#ifdef __ORBIS__
+		pSave = CreateOrbisRawSaveFile(initData->saveData->saveName, initData->saveData->data, initData->saveData->fileSize, initData->savePlatform);
+#else
+		if(ShouldUseSplitSavesForPlatform(initData->savePlatform))
+		{
+			ConsoleSaveFileOriginal oldFormatSave( initData->saveData->saveName, initData->saveData->data, initData->saveData->fileSize, false, initData->savePlatform );
+			pSave = new ConsoleSaveFileSplit( &oldFormatSave );
+		}
+		else
+		{
+			pSave = new ConsoleSaveFileOriginal( initData->saveData->saveName, initData->saveData->data, initData->saveData->fileSize, false, initData->savePlatform );
+		}
+#endif
+#else
+#ifdef __ORBIS__
+		ConsoleSaveFile* pSave = CreateOrbisRawSaveFile(initData->saveData->saveName, initData->saveData->data, initData->saveData->fileSize, initData->savePlatform );
 #else
 		ConsoleSaveFile* pSave = new ConsoleSaveFileOriginal( initData->saveData->saveName, initData->saveData->data, initData->saveData->fileSize, false, initData->savePlatform );
+#endif
 #endif
 		if(pSave->isSaveEndianDifferent())
 			levelChunksNeedConverted = true;
@@ -418,27 +500,34 @@ bool MinecraftServer::loadLevel(LevelStorageSource *storageSource, const wstring
 	else
 	{
 		// We are loading a save from the storage manager
-#ifdef SPLIT_SAVES
-		bool bLevelGenBaseSave = false;
-		LevelGenerationOptions *levelGen = app.getLevelGenerationOptions();
-		if( levelGen != NULL && levelGen->requiresBaseSave())
+#if defined(SPLIT_SAVES)
+		if(ShouldUseSplitSavesForPlatform(SAVE_FILE_PLATFORM_LOCAL))
 		{
-			DWORD fileSize = 0;
-			LPVOID pvSaveData = levelGen->getBaseSaveData(fileSize);
-			if(pvSaveData && fileSize != 0) bLevelGenBaseSave = true;
-		}
-		ConsoleSaveFileSplit *newFormatSave = NULL;
-		if(bLevelGenBaseSave)
-		{
-			ConsoleSaveFileOriginal oldFormatSave( L"" );
-			newFormatSave = new ConsoleSaveFileSplit( &oldFormatSave );
+			bool bLevelGenBaseSave = false;
+			LevelGenerationOptions *levelGen = app.getLevelGenerationOptions();
+			if( levelGen != NULL && levelGen->requiresBaseSave())
+			{
+				DWORD fileSize = 0;
+				LPVOID pvSaveData = levelGen->getBaseSaveData(fileSize);
+				if(pvSaveData && fileSize != 0) bLevelGenBaseSave = true;
+			}
+			ConsoleSaveFileSplit *newFormatSave = NULL;
+			if(bLevelGenBaseSave)
+			{
+				ConsoleSaveFileOriginal oldFormatSave( L"" );
+				newFormatSave = new ConsoleSaveFileSplit( &oldFormatSave );
+			}
+			else
+			{
+				newFormatSave = new ConsoleSaveFileSplit( L"" );
+			}
+
+			storage = shared_ptr<McRegionLevelStorage>(new McRegionLevelStorage(newFormatSave, File(L"."), name, true));
 		}
 		else
 		{
-			newFormatSave = new ConsoleSaveFileSplit( L"" );
+			storage = shared_ptr<McRegionLevelStorage>(new McRegionLevelStorage(new ConsoleSaveFileOriginal( L"" ), File(L"."), name, true));
 		}
-
-		storage = shared_ptr<McRegionLevelStorage>(new McRegionLevelStorage(newFormatSave, File(L"."), name, true));
 #else
 		storage = shared_ptr<McRegionLevelStorage>(new McRegionLevelStorage(new ConsoleSaveFileOriginal( L"" ), File(L"."), name, true));
 #endif

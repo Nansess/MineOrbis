@@ -351,10 +351,45 @@ void DirectoryLevelStorage::saveLevelData(LevelData *levelData, vector<shared_pt
 {
 	// 4J Jev, removed try/catch
 
+	// #ifdef __ORBIS__
+	// app.DebugPrintf("DirectoryLevelStorage::saveLevelData(players) - saveFile=%p levelData=%p players=%p\n",
+	//	m_saveFile, levelData, players);
+	// #endif
+	if(levelData == NULL)
+	{
+		// #ifdef __ORBIS__
+		// app.DebugPrintf("DirectoryLevelStorage::saveLevelData(players) - levelData is NULL\n");
+		// #endif
+		return;
+	}
+
 	CompoundTag *dataTag = levelData->createTag(players);
 
+	// #ifdef __ORBIS__
+	// app.DebugPrintf("DirectoryLevelStorage::saveLevelData(players) - dataTag=%p\n", dataTag);
+	// #endif
+	if(dataTag == NULL)
+	{
+		// #ifdef __ORBIS__
+		// app.DebugPrintf("DirectoryLevelStorage::saveLevelData(players) - dataTag is NULL\n");
+		// #endif
+		return;
+	}
+
 	CompoundTag *root = new CompoundTag();
+	if(root == NULL)
+	{
+		// #ifdef __ORBIS__
+		// app.DebugPrintf("DirectoryLevelStorage::saveLevelData(players) - root allocation failed\n");
+		// #endif
+		delete dataTag;
+		return;
+	}
 	root->put(L"Data", dataTag);
+
+	// #ifdef __ORBIS__
+	// app.DebugPrintf("DirectoryLevelStorage::saveLevelData(players) - root=%p writing level.dat\n", root);
+	// #endif
 
 	ConsoleSavePath currentFile = ConsoleSavePath( wstring( L"level.dat" ) );
 
@@ -368,10 +403,45 @@ void DirectoryLevelStorage::saveLevelData(LevelData *levelData)
 {
 	// 4J Jev, removed try/catch
 
+	// #ifdef __ORBIS__
+	// app.DebugPrintf("DirectoryLevelStorage::saveLevelData - saveFile=%p levelData=%p\n",
+	//	m_saveFile, levelData);
+	// #endif
+	if(levelData == NULL)
+	{
+		// #ifdef __ORBIS__
+		// app.DebugPrintf("DirectoryLevelStorage::saveLevelData - levelData is NULL\n");
+		// #endif
+		return;
+	}
+
 	CompoundTag *dataTag = levelData->createTag();
 
+	// #ifdef __ORBIS__
+	// app.DebugPrintf("DirectoryLevelStorage::saveLevelData - dataTag=%p\n", dataTag);
+	// #endif
+	if(dataTag == NULL)
+	{
+		// #ifdef __ORBIS__
+		// app.DebugPrintf("DirectoryLevelStorage::saveLevelData - dataTag is NULL\n");
+		// #endif
+		return;
+	}
+
 	CompoundTag *root = new CompoundTag();
+	if(root == NULL)
+	{
+		// #ifdef __ORBIS__
+		// app.DebugPrintf("DirectoryLevelStorage::saveLevelData - root allocation failed\n");
+		// #endif
+		delete dataTag;
+		return;
+	}
 	root->put(L"Data", dataTag);
+
+	// #ifdef __ORBIS__
+	// app.DebugPrintf("DirectoryLevelStorage::saveLevelData - root=%p writing level.dat\n", root);
+	// #endif
 
 	ConsoleSavePath currentFile = ConsoleSavePath( wstring( L"level.dat" ) );
 

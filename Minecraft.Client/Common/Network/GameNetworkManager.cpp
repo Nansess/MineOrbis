@@ -26,6 +26,7 @@
 #include "..\..\LevelRenderer.h"
 #include "..\..\..\Minecraft.World\IntCache.h"
 #include "..\GameRules\ConsoleGameRules.h"
+#include "..\ProfileModeShim.h"
 #include "GameNetworkManager.h"
 
 #ifdef _XBOX
@@ -48,6 +49,47 @@ __int64 CGameNetworkManager::messageQueue[512];
 __int64 CGameNetworkManager::byteQueue[512];
 int CGameNetworkManager::messageQueuePos = 0;
 
+namespace
+{
+	static ProgressRenderer *GetProgressRendererSafe(Minecraft *minecraft)
+	{
+		return minecraft != NULL ? minecraft->progressRenderer : NULL;
+	}
+
+	static TexturePackRepository *GetSkinRepositorySafe(Minecraft *minecraft)
+	{
+		return minecraft != NULL ? minecraft->skins : NULL;
+	}
+
+	static TexturePack *GetSelectedTexturePackSafe(TexturePackRepository *skins)
+	{
+		return skins != NULL ? skins->getSelected() : NULL;
+	}
+
+	static bool IsSkinReloadStillBusy(Minecraft *minecraft)
+	{
+		TexturePackRepository *skins = GetSkinRepositorySafe(minecraft);
+		TexturePack *selected = GetSelectedTexturePackSafe(skins);
+
+		bool packLoading = (selected != NULL) && selected->isLoadingData();
+		bool needsUiUpdate = (skins != NULL) && skins->needsUIUpdate();
+
+		return packLoading || needsUiUpdate || ui.IsReloadingSkin();
+	}
+
+	static void CleanUpSkinReloadSafe(Minecraft *minecraft)
+	{
+		TexturePackRepository *skins = GetSkinRepositorySafe(minecraft);
+		TexturePack *selected = GetSelectedTexturePackSafe(skins);
+		if(skins == NULL || selected == NULL)
+		{
+			return;
+		}
+
+		ui.CleanUpSkinReload();
+	}
+}
+
 CGameNetworkManager::CGameNetworkManager()
 {
 	m_bInitialised = false;
@@ -67,8 +109,10 @@ void CGameNetworkManager::Initialise()
 	int flagIndexSize = LevelRenderer::getGlobalChunkCount() / (Level::maxBuildHeight / 16);		// dividing here by number of renderer chunks in one column
 #ifdef _XBOX
 	s_pPlatformNetworkManager = new CPlatformNetworkManagerXbox();
-#elif defined __PS3__ || defined __ORBIS__ || defined __PSVITA__
+#elif defined __PS3__ || defined __PSVITA__
 	s_pPlatformNetworkManager = new CPlatformNetworkManagerSony();
+#elif defined __ORBIS__
+	s_pPlatformNetworkManager = new CPlatformNetworkManagerStub();
 #elif defined _DURANGO
 	s_pPlatformNetworkManager = new CPlatformNetworkManagerDurango();
 #else
@@ -119,28 +163,18 @@ void CGameNetworkManager::DoWork()
 	s_pPlatformNetworkManager->DoWork();
 
 #ifdef __ORBIS__
-	if (m_pUpsell != NULL && m_pUpsell->hasResponse())
+	// Orbis is running in stub/offline-profile mode, so PS Plus upsell handling is disabled.
+	if (m_pUpsell != NULL)
 	{
-		int iPad_invited = m_iPlayerInvited, iPad_checking = m_pUpsell->m_userIndex;
-
-		m_iPlayerInvited = -1;
-
 		delete m_pUpsell;
 		m_pUpsell = NULL;
-
-		if (ProfileManager.HasPlayStationPlus(iPad_checking))
-		{
-			this->GameInviteReceived(iPad_invited, m_pInviteInfo);
-
-			// m_pInviteInfo deleted by GameInviteReceived.
-			m_pInviteInfo = NULL;
-		}
-		else
-		{
-			delete m_pInviteInfo;
-			m_pInviteInfo = NULL;
-		}
 	}
+	if (m_pInviteInfo != NULL)
+	{
+		delete m_pInviteInfo;
+		m_pInviteInfo = NULL;
+	}
+	m_iPlayerInvited = -1;
 #endif
 }
 
@@ -239,18 +273,22 @@ bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParame
 
 #ifndef _XBOX
 	Minecraft *pMinecraft = Minecraft::GetInstance();	
+	ProgressRenderer *progressRenderer = GetProgressRendererSafe(pMinecraft);
 	// Make sure that we have transitioned through any joining/creating stages and are actually playing the game, so that we know the players should be valid
 	bool changedMessage = false;
 	while(!IsReadyToPlayOrIdle())
 	{
 		changedMessage = true;
-		pMinecraft->progressRenderer->progressStage( g_NetworkManager.CorrectErrorIDS(IDS_PROGRESS_SAVING_TO_DISC) );		// "Finalizing..." vaguest message I could find
-		pMinecraft->progressRenderer->progressStagePercentage( g_NetworkManager.GetJoiningReadyPercentage() );
+		if(progressRenderer != NULL)
+		{
+			progressRenderer->progressStage( g_NetworkManager.CorrectErrorIDS(IDS_PROGRESS_SAVING_TO_DISC) );		// "Finalizing..." vaguest message I could find
+			progressRenderer->progressStagePercentage( g_NetworkManager.GetJoiningReadyPercentage() );
+		}
 		Sleep(10);
 	}
-	if( changedMessage )
+	if( changedMessage && progressRenderer != NULL )
 	{
-		pMinecraft->progressRenderer->progressStagePercentage( 100 );
+		progressRenderer->progressStagePercentage( 100 );
 	}
 #endif
 
@@ -324,7 +362,11 @@ bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParame
 	// (3) the server sends a login back, which is handled by the client connection to start the game
 	if( !g_NetworkManager.IsHost() )
 	{
-		Minecraft::GetInstance()->progressRenderer->progressStart(IDS_PROGRESS_CONNECTING);
+		ProgressRenderer *progressRenderer = GetProgressRendererSafe(Minecraft::GetInstance());
+		if(progressRenderer != NULL)
+		{
+			progressRenderer->progressStart(IDS_PROGRESS_CONNECTING);
+		}
 	}
 	else
 	{
@@ -332,7 +374,6 @@ bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParame
 		INT multiplayerInstanceId = TelemetryManager->GenerateMultiplayerInstanceId();
 		TelemetryManager->SetMultiplayerInstanceId(multiplayerInstanceId);
 	}
-	TexturePack *tPack = Minecraft::GetInstance()->skins->getSelected();
 	do
 	{
 		app.DebugPrintf("ticking connection A\n");
@@ -341,8 +382,8 @@ bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParame
 		// 4J Stu - We were ticking this way too fast which could cause the connection to time out
 		// The connections should tick at 20 per second
 		Sleep(50);
-	} while ( (IsInSession() && !connection->isStarted() && !connection->isClosed() && !g_NetworkManager.IsLeavingGame()) || tPack->isLoadingData() || (Minecraft::GetInstance()->skins->needsUIUpdate() || ui.IsReloadingSkin()) );
-	ui.CleanUpSkinReload();
+	} while ( (IsInSession() && !connection->isStarted() && !connection->isClosed() && !g_NetworkManager.IsLeavingGame()) || IsSkinReloadStillBusy(Minecraft::GetInstance()) );
+	CleanUpSkinReloadSafe(Minecraft::GetInstance());
 
 	// 4J Stu - Fix for #11279 - CRASH: TCR 001: BAS Game Stability: Signing out of game will cause title to crash
 	// We need to break out of the above loop if m_bLeavingGame is set, and close the connection
@@ -689,7 +730,7 @@ int CGameNetworkManager::JoinFromInvite_SignInReturned(void *pParam,bool bContin
 	{
 #ifdef __ORBIS__
 		// Check if PSN is unavailable because of age restriction
-		int npAvailability = ProfileManager.getNPAvailability(iPad);
+		int npAvailability = GameGetNPAvailability(iPad);
 		if (npAvailability == SCE_NP_ERROR_AGE_RESTRICTION)
 		{
 			UINT uiIDA[1];
@@ -702,7 +743,7 @@ int CGameNetworkManager::JoinFromInvite_SignInReturned(void *pParam,bool bContin
 
 		app.DebugPrintf("JoinFromInvite_SignInReturned, iPad %d\n",iPad);
 		// It's possible that the player has not signed in - they can back out
-		if(ProfileManager.IsSignedIn(iPad) && ProfileManager.IsSignedInLive(iPad) )
+		if(ProfileManager.IsSignedIn(iPad) && GameIsSignedInLive(iPad) )
 		{
 			app.DebugPrintf("JoinFromInvite_SignInReturned, passed sign-in tests\n");
 			int localUsersMask = 0;
@@ -714,7 +755,7 @@ int CGameNetworkManager::JoinFromInvite_SignInReturned(void *pParam,bool bContin
 				if(ProfileManager.IsSignedIn(index) )
 				{
 					++joiningUsers;
-					if( !ProfileManager.AllowedToPlayMultiplayer(index) ) noPrivileges = true;
+					if( !GameAllowedToPlayMultiplayer(index) ) noPrivileges = true;
 					localUsersMask |= GetLocalPlayerMask( index );
 				}
 			}
@@ -762,7 +803,7 @@ int CGameNetworkManager::JoinFromInvite_SignInReturned(void *pParam,bool bContin
 				Minecraft::GetInstance()->clearConnectionFailed();
 
 				// change the minecraft player name
-				Minecraft::GetInstance()->user->name = convStringToWstring( ProfileManager.GetGamertag(ProfileManager.GetPrimaryPad()));
+				Minecraft::GetInstance()->user->name = GameGetLocalDisplayName(ProfileManager.GetPrimaryPad());
 
 				bool success = g_NetworkManager.JoinGameFromInviteInfo(
 							iPad, // dwUserIndex
@@ -776,7 +817,7 @@ int CGameNetworkManager::JoinFromInvite_SignInReturned(void *pParam,bool bContin
 		}
 		else
 		{
-			app.DebugPrintf("JoinFromInvite_SignInReturned, failed sign-in tests :%d %d\n",ProfileManager.IsSignedIn(iPad),ProfileManager.IsSignedInLive(iPad));
+			app.DebugPrintf("JoinFromInvite_SignInReturned, failed sign-in tests :%d %d\n",ProfileManager.IsSignedIn(iPad),GameIsSignedInLive(iPad));
 		}
 	}
 	return 0;
@@ -810,10 +851,17 @@ bool CGameNetworkManager::IsNetworkThreadRunning()
 
 int CGameNetworkManager::RunNetworkGameThreadProc( void* lpParameter )
 {
+	// ORBIS crashes here while the UI thread is still active, so avoid borrowing the main thread TLS pools.
+#ifdef __ORBIS__
+	AABB::CreateNewThreadStorage();
+	Vec3::CreateNewThreadStorage();
+	Compression::CreateNewThreadStorage();
+#else
 	// Share AABB & Vec3 pools with default (main thread) - should be ok as long as we don't tick the main thread whilst this thread is running
 	AABB::UseDefaultThreadStorage();
 	Vec3::UseDefaultThreadStorage();
 	Compression::UseDefaultThreadStorage();
+#endif
 	Tile::CreateNewThreadStorage();
 	IntCache::CreateNewThreadStorage();
 	
@@ -822,12 +870,13 @@ int CGameNetworkManager::RunNetworkGameThreadProc( void* lpParameter )
 	g_NetworkManager.m_bNetworkThreadRunning = false;
 	if( !success)
 	{
-		TexturePack *tPack = Minecraft::GetInstance()->skins->getSelected();
-		while ( tPack->isLoadingData() || (Minecraft::GetInstance()->skins->needsUIUpdate() || ui.IsReloadingSkin()) )
+		Minecraft *minecraft = Minecraft::GetInstance();
+		while ( IsSkinReloadStillBusy(minecraft) )
 		{
 			Sleep(1);
+			minecraft = Minecraft::GetInstance();
 		}
-		ui.CleanUpSkinReload();
+		CleanUpSkinReloadSafe(minecraft);
 		if(app.GetDisconnectReason() == DisconnectPacket::eDisconnect_None) 
 		{
 			app.SetDisconnectReason( DisconnectPacket::eDisconnect_ConnectionCreationFailed );
@@ -835,6 +884,12 @@ int CGameNetworkManager::RunNetworkGameThreadProc( void* lpParameter )
 		// If we failed before the server started, clear the game rules. Otherwise the server will clear it up.
 		if(MinecraftServer::getInstance() == NULL) app.m_gameRules.unloadCurrentGameRules();
 		Tile::ReleaseThreadStorage();
+		IntCache::ReleaseThreadStorage();
+#ifdef __ORBIS__
+		Compression::ReleaseThreadStorage();
+		Vec3::ReleaseThreadStorage();
+		AABB::ReleaseThreadStorage();
+#endif
 		return -1;
 	}
 
@@ -845,6 +900,11 @@ int CGameNetworkManager::RunNetworkGameThreadProc( void* lpParameter )
 
 	Tile::ReleaseThreadStorage();
 	IntCache::ReleaseThreadStorage();
+#ifdef __ORBIS__
+	Compression::ReleaseThreadStorage();
+	Vec3::ReleaseThreadStorage();
+	AABB::ReleaseThreadStorage();
+#endif
 	return 0;
 }
 
@@ -904,7 +964,7 @@ int	CGameNetworkManager::ExitAndJoinFromInviteThreadProc( void* lpParam )
 	JoinFromInviteData *inviteData = (JoinFromInviteData *)lpParam;
 	app.SetAction(inviteData->dwUserIndex, eAppAction_JoinFromInvite, lpParam);
 #else
-	if(ProfileManager.IsSignedInLive(ProfileManager.GetPrimaryPad()))
+	if(GameIsSignedInLive(ProfileManager.GetPrimaryPad()))
 	{
 		JoinFromInviteData *inviteData = (JoinFromInviteData *)lpParam;
 		app.SetAction(inviteData->dwUserIndex, eAppAction_JoinFromInvite, lpParam);
@@ -933,7 +993,7 @@ int	CGameNetworkManager::MustSignInReturned_0(void *pParam,int iPad,C4JStorage::
 #elif defined __PSVITA__
 		SQRNetworkManager_Vita::AttemptPSNSignIn(&CGameNetworkManager::PSNSignInReturned_0, pParam,true);
 #elif defined __ORBIS__
-		SQRNetworkManager_Orbis::AttemptPSNSignIn(&CGameNetworkManager::PSNSignInReturned_0, pParam,true);
+		CGameNetworkManager::PSNSignInReturned_0(pParam, true, ProfileManager.GetPrimaryPad());
 #endif
 	}
 	else
@@ -993,7 +1053,7 @@ int	CGameNetworkManager::MustSignInReturned_1(void *pParam,int iPad,C4JStorage::
 #elif defined __PSVITA__
 		SQRNetworkManager_Vita::AttemptPSNSignIn(&CGameNetworkManager::PSNSignInReturned_1, pParam,true);
 #elif defined __ORBIS__
-		SQRNetworkManager_Orbis::AttemptPSNSignIn(&CGameNetworkManager::PSNSignInReturned_1, pParam,true);
+		CGameNetworkManager::PSNSignInReturned_1(pParam, true, ProfileManager.GetPrimaryPad());
 #endif
 	}
 	return 0;
@@ -1537,77 +1597,7 @@ void CGameNetworkManager::WriteStats( INetworkPlayer *pNetworkPlayer )
 void CGameNetworkManager::GameInviteReceived( int userIndex, const INVITE_INFO *pInviteInfo)
 {
 #ifdef __ORBIS__
-	if (m_pUpsell != NULL)
-	{
-		delete pInviteInfo;
-		return;
-	}
-
-	// Need to check we're signed in to PSN
-	bool isSignedInLive = true;		
-	bool isLocalMultiplayerAvailable = app.IsLocalMultiplayerAvailable();
-	int iPadNotSignedInLive = -1;
-	for(unsigned int i = 0; i < XUSER_MAX_COUNT; i++)
-	{
-		if (ProfileManager.IsSignedIn(i) && (i == ProfileManager.GetPrimaryPad() || isLocalMultiplayerAvailable))
-		{
-			if (isSignedInLive && !ProfileManager.IsSignedInLive(i))
-			{
-				// Record the first non signed in live pad
-				iPadNotSignedInLive = i;
-			}
-
-			isSignedInLive = isSignedInLive && ProfileManager.IsSignedInLive(i);
-		}
-	}
-
-	if (!isSignedInLive)
-	{
-		// Determine why they're not "signed in live"
-
-		// Check if PSN is unavailable because of age restriction
-		int npAvailability = ProfileManager.getNPAvailability(iPadNotSignedInLive);
-		if (npAvailability == SCE_NP_ERROR_AGE_RESTRICTION)
-		{
-			// 4J Stu - This is a bit messy and is due to the library incorrectly returning false for IsSignedInLive if the npAvailability isn't SCE_OK
-			UINT uiIDA[1];
-			uiIDA[0]=IDS_OK;
-			ui.RequestMessageBox(IDS_ONLINE_SERVICE_TITLE, IDS_CONTENT_RESTRICTION, uiIDA, 1, iPadNotSignedInLive, NULL, NULL, app.GetStringTable());
-		}
-		else if (ProfileManager.isSignedInPSN(iPadNotSignedInLive))
-		{
-			// Signed in to PSN but not connected (no internet access)
-			assert(!ProfileManager.isConnectedToPSN(iPadNotSignedInLive));
-
-			UINT uiIDA[1];
-			uiIDA[0] = IDS_OK;
-			ui.RequestMessageBox( IDS_ERROR_NETWORK_TITLE, IDS_ERROR_NETWORK, uiIDA, 1, iPadNotSignedInLive, NULL, NULL, app.GetStringTable());
-		}
-		else
-		{		
-			// Not signed in to PSN
-			UINT uiIDA[1];
-			uiIDA[0] = IDS_PRO_NOTONLINE_ACCEPT;
-			ui.RequestMessageBox( IDS_PRO_NOTONLINE_TITLE, IDS_PRO_NOTONLINE_TEXT, uiIDA, 1, iPadNotSignedInLive, &CGameNetworkManager::MustSignInReturned_1, (void *)pInviteInfo, app.GetStringTable(), NULL, 0, false);
-		}
-		return;
-	}
-
-	// 4J-JEV: Check that all players are authorised for PsPlus, present upsell to players that aren't and try again.
-	for (unsigned int index = 0; index < XUSER_MAX_COUNT; index++)
-	{
-		if (	 ProfileManager.IsSignedIn(index)
-			&&	!ProfileManager.HasPlayStationPlus(userIndex) )
-		{
-			m_pInviteInfo = (INVITE_INFO *) pInviteInfo;
-			m_iPlayerInvited = userIndex;
-			
-			m_pUpsell = new PsPlusUpsellWrapper(index);
-			m_pUpsell->displayUpsell();
-			
-			return;
-		}
-	}
+	// Orbis now follows the Windows64-style stub flow and no longer blocks on PSN state.
 #endif
 
 #ifdef __PSVITA__
@@ -1650,7 +1640,7 @@ void CGameNetworkManager::GameInviteReceived( int userIndex, const INVITE_INFO *
 			if(index==userIndex || pMinecraft->localplayers[index]!=NULL )
 			{	
 				++joiningUsers;
-				if( !ProfileManager.AllowedToPlayMultiplayer(index) ) noPrivileges = true;	
+				if( !GameAllowedToPlayMultiplayer(index) ) noPrivileges = true;	
 				localUsersMask |= GetLocalPlayerMask( index );
 			}
 		}
@@ -1721,7 +1711,7 @@ void CGameNetworkManager::GameInviteReceived( int userIndex, const INVITE_INFO *
 			HandleInviteWhenInMenus(userIndex, pInviteInfo);			
 #else
 			// PS3 is more complicated here - we need to make sure that the player is online. If they are then we can do the same as the xbox, if not we need to try and get them online and then, if they do sign in, go down the same path
-			if(ProfileManager.IsSignedInLive(ProfileManager.GetPrimaryPad()))
+			if(GameIsSignedInLive(ProfileManager.GetPrimaryPad()))
 			{
 				HandleInviteWhenInMenus(userIndex, pInviteInfo);
 			}
@@ -1789,7 +1779,7 @@ void CGameNetworkManager::HandleInviteWhenInMenus( int userIndex, const INVITE_I
 
 		if(!app.IsLocalMultiplayerAvailable())
 		{
-			bool noPrivileges=!ProfileManager.AllowedToPlayMultiplayer(userIndex);
+			bool noPrivileges=!GameAllowedToPlayMultiplayer(userIndex);
 
 			if(noPrivileges)
 			{
@@ -1814,7 +1804,7 @@ void CGameNetworkManager::HandleInviteWhenInMenus( int userIndex, const INVITE_I
 				g_NetworkManager.SetLocalGame(false);
 
 				// change the minecraft player name
-				Minecraft::GetInstance()->user->name = convStringToWstring( ProfileManager.GetGamertag(ProfileManager.GetPrimaryPad()));
+				Minecraft::GetInstance()->user->name = GameGetLocalDisplayName(ProfileManager.GetPrimaryPad());
 
 				bool success = g_NetworkManager.JoinGameFromInviteInfo( userIndex, localUsersMask, pInviteInfo );
 				if( !success )
@@ -1879,17 +1869,17 @@ int  CGameNetworkManager::GetLockedProfile()
 
 bool CGameNetworkManager::IsSignedInLive(int playerIdx)
 {
-	return ProfileManager.IsSignedInLive(playerIdx);
+	return GameIsSignedInLive(playerIdx);
 }
 
 bool CGameNetworkManager::AllowedToPlayMultiplayer(int playerIdx)
 {
-	return ProfileManager.AllowedToPlayMultiplayer(playerIdx);
+	return GameAllowedToPlayMultiplayer(playerIdx);
 }
 
 char *CGameNetworkManager::GetOnlineName(int playerIdx)
 {
-	return ProfileManager.GetGamertag(playerIdx);
+	return GameGetOnlineName(playerIdx);
 }
 
 void CGameNetworkManager::ServerReadyCreate(bool create)

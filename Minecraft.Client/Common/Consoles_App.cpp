@@ -44,6 +44,7 @@
 #include "..\..\Minecraft.World\compression.h"
 #include "..\TexturePackRepository.h"
 #include "..\DLCTexturePack.h"
+#include "..\Common\ProfileModeShim.h"
 #include "DLC\DLCPack.h"
 #include "..\StringTable.h"
 #ifndef _XBOX
@@ -84,6 +85,24 @@ int CMinecraftApp::s_iHTMLFontSizesA[eHTMLSize_COUNT] =
 	20,13,20,26
 #endif
 };
+
+#ifdef __ORBIS__
+namespace
+{
+	static const DWORD ORBIS_GLOBAL_SETTINGS_MAGIC = 0x3147534d; // MSG1
+	static const DWORD ORBIS_GLOBAL_SETTINGS_VERSION = 1;
+	static const DWORD ORBIS_GLOBAL_SETTINGS_FLAG_DEBUG_ENABLED = 0x00000001;
+	static const char *ORBIS_GLOBAL_SETTINGS_PATH = "/data/minecraft/settings";
+
+	struct OrbisGlobalSettingsHeader
+	{
+		DWORD dwMagic;
+		DWORD dwVersion;
+		DWORD dwSettingsBytes;
+		DWORD dwFlags;
+	};
+}
+#endif
 
 
 CMinecraftApp::CMinecraftApp()
@@ -802,6 +821,104 @@ int CMinecraftApp::OptionsDataCallback(LPVOID pParam,int iPad,unsigned short usV
 int CMinecraftApp::GetOptionsBlocksRequired(int iPad)
 {
 	return m_eOptionsBlocksRequiredA[iPad];
+}
+
+bool CMinecraftApp::LoadGlobalSettingsFromDisk(int iPad)
+{
+	if(iPad < 0 || iPad >= XUSER_MAX_COUNT || GameSettingsA[iPad] == NULL)
+	{
+		return false;
+	}
+
+	HANDLE hFile = CreateFile(ORBIS_GLOBAL_SETTINGS_PATH, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	if(hFile == INVALID_HANDLE_VALUE)
+	{
+		return false;
+	}
+
+	OrbisGlobalSettingsHeader header;
+	DWORD bytesRead = 0;
+	BOOL ok = ReadFile(hFile, &header, sizeof(header), &bytesRead, NULL);
+	if(ok == FALSE || bytesRead != sizeof(header))
+	{
+		CloseHandle(hFile);
+		app.DebugPrintf("LoadGlobalSettingsFromDisk: failed to read header\n");
+		return false;
+	}
+
+	if(header.dwMagic != ORBIS_GLOBAL_SETTINGS_MAGIC ||
+		header.dwVersion != ORBIS_GLOBAL_SETTINGS_VERSION ||
+		header.dwSettingsBytes != sizeof(GAME_SETTINGS))
+	{
+		CloseHandle(hFile);
+		app.DebugPrintf("LoadGlobalSettingsFromDisk: ignoring incompatible settings file (magic=%08X version=%u size=%u)\n",
+			header.dwMagic, header.dwVersion, header.dwSettingsBytes);
+		return false;
+	}
+
+	GAME_SETTINGS loadedSettings;
+	ok = ReadFile(hFile, &loadedSettings, sizeof(loadedSettings), &bytesRead, NULL);
+	CloseHandle(hFile);
+
+	if(ok == FALSE || bytesRead != sizeof(loadedSettings))
+	{
+		app.DebugPrintf("LoadGlobalSettingsFromDisk: failed to read settings payload\n");
+		return false;
+	}
+
+	loadedSettings.bSettingsChanged = false;
+	memcpy(GameSettingsA[iPad], &loadedSettings, sizeof(loadedSettings));
+	GameSettingsA[iPad]->bSettingsChanged = false;
+	m_bDebugOptions = (header.dwFlags & ORBIS_GLOBAL_SETTINGS_FLAG_DEBUG_ENABLED) != 0;
+
+	app.DebugPrintf("LoadGlobalSettingsFromDisk: loaded settings for pad %d from %s\n", iPad, ORBIS_GLOBAL_SETTINGS_PATH);
+	return true;
+}
+
+void CMinecraftApp::SaveGlobalSettingsToDisk(int iPad)
+{
+	if(iPad < 0 || iPad >= XUSER_MAX_COUNT || GameSettingsA[iPad] == NULL)
+	{
+		return;
+	}
+
+	CreateDirectory("/data/minecraft", NULL);
+
+	HANDLE hFile = CreateFile(ORBIS_GLOBAL_SETTINGS_PATH, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if(hFile == INVALID_HANDLE_VALUE)
+	{
+		app.DebugPrintf("SaveGlobalSettingsToDisk: failed to open %s for write\n", ORBIS_GLOBAL_SETTINGS_PATH);
+		return;
+	}
+
+	OrbisGlobalSettingsHeader header;
+	header.dwMagic = ORBIS_GLOBAL_SETTINGS_MAGIC;
+	header.dwVersion = ORBIS_GLOBAL_SETTINGS_VERSION;
+	header.dwSettingsBytes = sizeof(GAME_SETTINGS);
+	header.dwFlags = m_bDebugOptions ? ORBIS_GLOBAL_SETTINGS_FLAG_DEBUG_ENABLED : 0;
+
+	GAME_SETTINGS savedSettings = *GameSettingsA[iPad];
+	savedSettings.bSettingsChanged = false;
+
+	DWORD bytesWritten = 0;
+	BOOL ok = WriteFile(hFile, &header, sizeof(header), &bytesWritten, NULL);
+	if(ok == FALSE || bytesWritten != sizeof(header))
+	{
+		app.DebugPrintf("SaveGlobalSettingsToDisk: failed to write header\n");
+		CloseHandle(hFile);
+		return;
+	}
+
+	ok = WriteFile(hFile, &savedSettings, sizeof(savedSettings), &bytesWritten, NULL);
+	if(ok == FALSE || bytesWritten != sizeof(savedSettings))
+	{
+		app.DebugPrintf("SaveGlobalSettingsToDisk: failed to write settings payload\n");
+		CloseHandle(hFile);
+		return;
+	}
+
+	CloseHandle(hFile);
+	app.DebugPrintf("SaveGlobalSettingsToDisk: wrote settings for pad %d to %s\n", iPad, ORBIS_GLOBAL_SETTINGS_PATH);
 }
 
 #else
@@ -1592,6 +1709,11 @@ void CMinecraftApp::SetGameSettings(int iPad,eGameSetting eVal,unsigned char ucV
 {
 	//Minecraft *pMinecraft=Minecraft::GetInstance();
 
+#ifdef __ORBIS__
+	GAME_SETTINGS originalSettings = *GameSettingsA[iPad];
+	originalSettings.bSettingsChanged = false;
+#endif
+
 	switch(eVal)
 	{
 	case eGameSetting_MusicVolume:
@@ -2028,24 +2150,35 @@ void CMinecraftApp::SetGameSettings(int iPad,eGameSetting eVal,unsigned char ucV
 			GameSettingsA[iPad]->bSettingsChanged=true;
 		}		
 		break;	
-	case eGameSetting_PSVita_NetworkModeAdhoc:
-		if((GameSettingsA[iPad]->uiBitmaskValues&GAMESETTING_PSVITANETWORKMODEADHOC)!=(ucVal&0x01)<<17)
-		{
-			if(ucVal==1)
+		case eGameSetting_PSVita_NetworkModeAdhoc:
+			if((GameSettingsA[iPad]->uiBitmaskValues&GAMESETTING_PSVITANETWORKMODEADHOC)!=(ucVal&0x01)<<17)
 			{
-				GameSettingsA[iPad]->uiBitmaskValues|=GAMESETTING_PSVITANETWORKMODEADHOC;
-			}
-			else
-			{
-				GameSettingsA[iPad]->uiBitmaskValues&=~GAMESETTING_PSVITANETWORKMODEADHOC;
-			}
-			ActionGameSettings(iPad,eVal);
-			GameSettingsA[iPad]->bSettingsChanged=true;
-		}		
-		break;	
+				if(ucVal==1)
+				{
+					GameSettingsA[iPad]->uiBitmaskValues|=GAMESETTING_PSVITANETWORKMODEADHOC;
+				}
+				else
+				{
+					GameSettingsA[iPad]->uiBitmaskValues&=~GAMESETTING_PSVITANETWORKMODEADHOC;
+				}
+				ActionGameSettings(iPad,eVal);
+				GameSettingsA[iPad]->bSettingsChanged=true;
+			}		
+			break;	
 
+		}
+
+#ifdef __ORBIS__
+	GAME_SETTINGS updatedSettings = *GameSettingsA[iPad];
+	updatedSettings.bSettingsChanged = false;
+	// Mirror settings changes immediately so runtime tweaks survive a crash/restart
+	// even before the deferred profile write runs.
+	if(memcmp(&updatedSettings, &originalSettings, sizeof(GAME_SETTINGS)) != 0)
+	{
+		SaveGlobalSettingsToDisk(iPad);
 	}
-}
+#endif
+	}
 
 unsigned char CMinecraftApp::GetGameSettings(eGameSetting eVal)
 {
@@ -2183,6 +2316,9 @@ void CMinecraftApp::CheckGameSettingsChanged(bool bOverride5MinuteTimer, int iPa
 		{
 			if(GameSettingsA[i]->bSettingsChanged)
 			{
+#ifdef __ORBIS__
+				SaveGlobalSettingsToDisk(i);
+#endif
 #if ( defined __PS3__ || defined __ORBIS__ || defined _DURANGO || defined __PSVITA__ )
 				StorageManager.WriteToProfile(i,true, bOverride5MinuteTimer);
 #else
@@ -2196,6 +2332,9 @@ void CMinecraftApp::CheckGameSettingsChanged(bool bOverride5MinuteTimer, int iPa
 	{
 		if(GameSettingsA[iPad]->bSettingsChanged)
 		{
+#ifdef __ORBIS__
+			SaveGlobalSettingsToDisk(iPad);
+#endif
 #if ( defined  __PS3__ || defined __ORBIS__ || defined _DURANGO || defined __PSVITA__)
 			StorageManager.WriteToProfile(iPad,true, bOverride5MinuteTimer);
 #else
@@ -2397,12 +2536,12 @@ void CMinecraftApp::ActionDebugMask(int iPad,bool bSetAllClear)
 			else
 			{
 				app.SetMobsDontTickEnabled(false);
-			}
-			break;
+			}		
+			break;	
 
 		}
+		}
 	}
-}
 #endif
 
 int CMinecraftApp::DisplaySavingMessage(void *pParam, C4JStorage::ESavingMessage eVal, int iPad)
@@ -4884,7 +5023,7 @@ int CMinecraftApp::MustSignInFullVersionPurchaseReturned(void *pParam,int iPad,C
 #elif defined __PSVITA__
 		SQRNetworkManager_Vita::AttemptPSNSignIn(&CMinecraftApp::NowDisplayFullVersionPurchase, &app,true);
 #else // __PS4__
-		SQRNetworkManager_Orbis::AttemptPSNSignIn(&CMinecraftApp::NowDisplayFullVersionPurchase, &app,true);
+		CMinecraftApp::NowDisplayFullVersionPurchase(&app, true, iPad);
 #endif
 	}
 
@@ -4901,7 +5040,7 @@ int CMinecraftApp::MustSignInFullVersionPurchaseReturnedExitTrial(void *pParam,i
 #elif defined __PSVITA__
 		SQRNetworkManager_Vita::AttemptPSNSignIn(&CMinecraftApp::NowDisplayFullVersionPurchase, &app,true);
 #else // __PS4__
-		SQRNetworkManager_Orbis::AttemptPSNSignIn(&CMinecraftApp::NowDisplayFullVersionPurchase, &app,true);
+		CMinecraftApp::NowDisplayFullVersionPurchase(&app, true, iPad);
 #endif
 	}
 
@@ -4993,6 +5132,15 @@ int CMinecraftApp::DebugInputCallback(LPVOID pParam)
 			app.ActionDebugMask(i,true);
 		}
 	}
+
+#ifdef __ORBIS__
+	int iPad = ProfileManager.GetPrimaryPad();
+	if(iPad < 0)
+	{
+		iPad = 0;
+	}
+	pClass->SaveGlobalSettingsToDisk(iPad);
+#endif
 
 	return 0;
 }

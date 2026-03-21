@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "UI.h"
 #include "UIScene_LoadOrJoinMenu.h"
+#include "..\ProfileModeShim.h"
 
 #include "..\..\..\Minecraft.World\StringHelpers.h"
 #include "..\..\..\Minecraft.World\net.minecraft.world.item.h"
@@ -134,7 +135,7 @@ UIScene_LoadOrJoinMenu::UIScene_LoadOrJoinMenu(int iPad, void *initData, UILayer
 #endif
 	m_eAction = eAction_None;
 
-    m_bMultiplayerAllowed = ProfileManager.IsSignedInLive( m_iPad ) && ProfileManager.AllowedToPlayMultiplayer(m_iPad);
+    m_bMultiplayerAllowed = GameHasOnlineServices(m_iPad);
 
 #ifdef _XBOX_ONE
 	// 4J-PB - in order to buy the skin packs & texture packs, we need the signed offer ids for them, which we get in the availability info
@@ -369,7 +370,7 @@ void UIScene_LoadOrJoinMenu::updateTooltips()
     else
     {
 #if defined _XBOX_ONE
-		if(ProfileManager.IsSignedInLive( m_iPad ))
+		if(GameIsSignedInLive(m_iPad))
 		{
 			// Is there a save from 360 on TMS?
 			iX=IDS_TOOLTIPS_SAVETRANSFER_DOWNLOAD;
@@ -379,7 +380,7 @@ void UIScene_LoadOrJoinMenu::updateTooltips()
 		// Sony asked that this be displayed at all times so users are aware of the functionality. We'll display some text when there's no save available
         //if(app.getRemoteStorage()->saveIsAvailable())
 		{		
-			bool bSignedInLive = ProfileManager.IsSignedInLive(m_iPad);
+			bool bSignedInLive = GameIsSignedInLive(m_iPad);
 			if(bSignedInLive)
 			{
 				iX=IDS_TOOLTIPS_SAVETRANSFER_DOWNLOAD;
@@ -481,7 +482,7 @@ void UIScene_LoadOrJoinMenu::handleGainFocus(bool navBack)
     {
         app.SetLiveLinkRequired( true );
 
-        m_bMultiplayerAllowed = ProfileManager.IsSignedInLive( m_iPad ) && ProfileManager.AllowedToPlayMultiplayer(m_iPad); 
+        m_bMultiplayerAllowed = GameHasOnlineServices(m_iPad); 
 
         // re-enable button presses
         m_bIgnoreInput=false;
@@ -978,7 +979,7 @@ void UIScene_LoadOrJoinMenu::handleInput(int iPad, int key, bool repeat, bool pr
 #endif
         // Save Transfer
 #ifdef _XBOX_ONE
-		if(ProfileManager.IsSignedInLive( m_iPad ))
+		if(GameIsSignedInLive(m_iPad))
 		{
 			UIScene_LoadOrJoinMenu::s_ulFileSize=0;
 			LaunchSaveTransfer();
@@ -986,7 +987,7 @@ void UIScene_LoadOrJoinMenu::handleInput(int iPad, int key, bool repeat, bool pr
 #endif
 #ifdef SONY_REMOTE_STORAGE_DOWNLOAD
 		{
-			bool bSignedInLive = ProfileManager.IsSignedInLive(iPad);
+			bool bSignedInLive = GameIsSignedInLive(iPad);
 			if(bSignedInLive)
 			{			
 				LaunchSaveTransfer();
@@ -1001,7 +1002,7 @@ void UIScene_LoadOrJoinMenu::handleInput(int iPad, int key, bool repeat, bool pr
         {
 #ifdef __ORBIS__
 			// Check if PSN is unavailable because of age restriction
-			int npAvailability = ProfileManager.getNPAvailability(iPad);
+			int npAvailability = GameGetNPAvailability(iPad);
 			if (npAvailability == SCE_NP_ERROR_AGE_RESTRICTION)
 			{
 				UINT uiIDA[1];
@@ -1013,7 +1014,7 @@ void UIScene_LoadOrJoinMenu::handleInput(int iPad, int key, bool repeat, bool pr
 #endif
 
             // are we offline?
-            if(!ProfileManager.IsSignedInLive(iPad))
+            if(!GameIsSignedInLive(iPad))
             {
                 // get them to sign in to online
                 UINT uiIDA[2];
@@ -1024,7 +1025,7 @@ void UIScene_LoadOrJoinMenu::handleInput(int iPad, int key, bool repeat, bool pr
             else
             {
 #ifdef __ORBIS__
-                SQRNetworkManager_Orbis::RecvInviteGUI();
+                m_bIgnoreInput = false;
 #elif defined __PSVITA__
                 SQRNetworkManager_Vita::RecvInviteGUI();
 #else
@@ -1074,7 +1075,7 @@ void UIScene_LoadOrJoinMenu::handleInput(int iPad, int key, bool repeat, bool pr
                         uiIDA[2]=IDS_TOOLTIPS_DELETESAVE;
                         int numOptions = 3;
 #ifdef SONY_REMOTE_STORAGE_UPLOAD
-                        if(ProfileManager.IsSignedInLive(ProfileManager.GetPrimaryPad()))
+                        if(GameIsSignedInLive(ProfileManager.GetPrimaryPad()))
                         {
                             numOptions = 4;
                             uiIDA[3]=IDS_TOOLTIPS_SAVETRANSFER_UPLOAD;
@@ -1389,14 +1390,14 @@ void UIScene_LoadOrJoinMenu::CheckAndJoinGame(int gameIndex)
 		{
 			if( InputManager.IsPadConnected(i) || ProfileManager.IsSignedIn(i) )
 			{
-				if (isSignedInLive && !ProfileManager.IsSignedInLive(i))
+				if (isSignedInLive && !GameIsSignedInLive(i))
 				{
 					// Record the first non signed in live pad
 					iPadNotSignedInLive = i;
 				}
 
-				isSignedInLive = isSignedInLive && ProfileManager.IsSignedInLive(i);
-				if(ProfileManager.HasPlayStationPlus(i)==false)
+				isSignedInLive = isSignedInLive && GameIsSignedInLive(i);
+				if(GameHasNetworkSubscription(i)==false)
 				{
 					bPlayStationPlus=false;
 					break;
@@ -1443,7 +1444,7 @@ void UIScene_LoadOrJoinMenu::CheckAndJoinGame(int gameIndex)
 			uiIDA[0]=IDS_CONFIRM_OK;
 
 			// Check if PSN is unavailable because of age restriction
-			int npAvailability = ProfileManager.getNPAvailability(iPadNotSignedInLive);
+			int npAvailability = GameGetNPAvailability(iPadNotSignedInLive);
 			if (npAvailability == SCE_NP_ERROR_AGE_RESTRICTION)
 			{
 				m_bIgnoreInput = false;
@@ -1817,7 +1818,7 @@ void UIScene_LoadOrJoinMenu::handleTimerComplete(int id)
             }
 #endif
 
-            bool bMultiplayerAllowed = ProfileManager.IsSignedInLive( m_iPad ) && ProfileManager.AllowedToPlayMultiplayer(m_iPad);
+            bool bMultiplayerAllowed = GameHasOnlineServices(m_iPad);
             if(bMultiplayerAllowed != m_bMultiplayerAllowed)
             {
                 if( bMultiplayerAllowed )
@@ -2216,7 +2217,7 @@ int UIScene_LoadOrJoinMenu::TexturePackDialogReturned(void *pParam,int iPad,C4JS
 #if defined _XBOX_ONE		
 		if(ProfileManager.IsSignedIn(iPad))
 		{	
-			if (ProfileManager.IsSignedInLive(iPad))
+			if (GameIsSignedInLive(iPad))
 			{
 				wstring ProductId;
 				app.GetDLCFullOfferIDForPackID(pClass->m_initData->selectedSession->data.texturePackParentId,ProductId);
@@ -2249,7 +2250,7 @@ int UIScene_LoadOrJoinMenu::MustSignInReturnedPSN(void *pParam,int iPad,C4JStora
 #elif defined __PSVITA__
 		SQRNetworkManager_Vita::AttemptPSNSignIn(&UIScene_LoadOrJoinMenu::PSN_SignInReturned, pClass);
 #else
-		SQRNetworkManager_Orbis::AttemptPSNSignIn(&UIScene_LoadOrJoinMenu::PSN_SignInReturned, pClass, false, iPad);
+		UIScene_LoadOrJoinMenu::PSN_SignInReturned(pClass, true, iPad);
 #endif
 	}
 	else
@@ -2269,7 +2270,7 @@ int UIScene_LoadOrJoinMenu::PSN_SignInReturned(void *pParam,bool bContinue, int 
 		{
 		case eAction_ViewInvites:
 			// Check if we're signed in to LIVE
-			if(ProfileManager.IsSignedInLive(iPad))
+			if(GameIsSignedInLive(iPad))
 			{
 #if defined(__PS3__)
 				int ret = sceNpBasicRecvMessageCustom(SCE_NP_BASIC_MESSAGE_MAIN_TYPE_INVITE, SCE_NP_BASIC_RECV_MESSAGE_OPTIONS_INCLUDE_BOOTABLE, SYS_MEMORY_CONTAINER_ID_INVALID);
@@ -2278,7 +2279,7 @@ int UIScene_LoadOrJoinMenu::PSN_SignInReturned(void *pParam,bool bContinue, int 
 				// TO BE IMPLEMENTED FOR VITA
 				PSVITA_STUBBED;
 #else
-				SQRNetworkManager_Orbis::RecvInviteGUI();
+				pClass->m_bIgnoreInput = false;
 #endif
 			}
 			break;
@@ -2632,7 +2633,7 @@ int UIScene_LoadOrJoinMenu::DownloadSonyCrossSaveThreadProc( LPVOID lpParameter 
 				}
 
 
-#ifdef SPLIT_SAVES		
+#if defined(SPLIT_SAVES) && SAVE_FILE_PLATFORM_LOCAL == SAVE_FILE_PLATFORM_XBONE
                 ConsoleSaveFileOriginal oldFormatSave( wSaveName, ba.data, ba.length, false, app.getRemoteStorage()->getSavePlatform() );
                 pSave = new ConsoleSaveFileSplit( &oldFormatSave, false, pMinecraft->progressRenderer );
 
@@ -2644,7 +2645,7 @@ int UIScene_LoadOrJoinMenu::DownloadSonyCrossSaveThreadProc( LPVOID lpParameter 
                 pClass->m_eSaveTransferState = eSaveTransfer_Converting;
 				pMinecraft->progressRenderer->progressStage(IDS_SAVETRANSFER_STAGE_CONVERTING);
 #endif
-                delete ba.data;
+                delete [] ba.data;
             }
 			break;
         case eSaveTransfer_Converting:
@@ -3099,7 +3100,7 @@ int UIScene_LoadOrJoinMenu::DownloadXbox360SaveThreadProc( LPVOID lpParameter )
 
                         StorageManager.SetSaveImages(ba.data, ba.length, NULL, 0, NULL, 0);
 
-                        delete ba.data;
+                        delete [] ba.data;
                     }
 
                     UIScene_LoadOrJoinMenu::s_transferData = byteArray();
@@ -3109,7 +3110,7 @@ int UIScene_LoadOrJoinMenu::DownloadXbox360SaveThreadProc( LPVOID lpParameter )
                 break;
             case eSaveTransferFile_SaveData:
                 {
-#ifdef SPLIT_SAVES
+#if defined(SPLIT_SAVES) && SAVE_FILE_PLATFORM_LOCAL == SAVE_FILE_PLATFORM_XBONE
 					if(!pStateContainer->m_bSaveTransferCancelled) 
 					{
 						ConsoleSaveFileOriginal oldFormatSave( L"Temp name", UIScene_LoadOrJoinMenu::s_transferData.data, UIScene_LoadOrJoinMenu::s_transferData.length, false, SAVE_FILE_PLATFORM_X360 );
@@ -3124,7 +3125,7 @@ int UIScene_LoadOrJoinMenu::DownloadXbox360SaveThreadProc( LPVOID lpParameter )
                     pSave = new ConsoleSaveFileOriginal( wSaveName, m_transferData.data, m_transferData.length, false, SAVE_FILE_PLATFORM_X360 );
                     pStateContainer->m_eSaveTransferState=C4JStorage::eSaveTransfer_Converting;
 #endif
-                    delete UIScene_LoadOrJoinMenu::s_transferData.data;
+                    delete [] UIScene_LoadOrJoinMenu::s_transferData.data;
                     UIScene_LoadOrJoinMenu::s_transferData = byteArray();
                 }
                 break;
@@ -3300,7 +3301,7 @@ int UIScene_LoadOrJoinMenu::SaveTransferReturned(LPVOID lpParam,C4JStorage::SAVE
     }
     else
     {
-        delete UIScene_LoadOrJoinMenu::s_transferData.data;
+        delete [] UIScene_LoadOrJoinMenu::s_transferData.data;
         UIScene_LoadOrJoinMenu::s_transferData = byteArray(pSaveTransferDetails->pbData, UIScene_LoadOrJoinMenu::s_ulFileSize);
         pClass->m_eSaveTransferState=C4JStorage::eSaveTransfer_FileDataRetrieved;
     }

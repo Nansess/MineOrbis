@@ -5,7 +5,7 @@
 class LevelGenerationOptions;
 
 
-#if defined __PS3__ || defined __ORBIS__ || defined(__PSVITA__)
+#if defined __PS3__ || defined(__PSVITA__)
 #define SONY_REMOTE_STORAGE_DOWNLOAD
 #endif 
 #if defined __PS3__ || __PSVITA__

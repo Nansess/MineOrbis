@@ -24,13 +24,28 @@ void ItemFrame::_init()
 
 ItemFrame::ItemFrame(Level *level) : HangingEntity( level )
 {
+#ifdef __ORBIS__
+	app.DebugPrintf("ItemFrame::ItemFrame default begin this=%p level=%p\n", this, level);
+#endif
 	_init();
+#ifdef __ORBIS__
+	app.DebugPrintf("ItemFrame::ItemFrame default end this=%p entityData=%p bb=%p\n", this, getEntityData().get(), bb);
+#endif
 }
 
 ItemFrame::ItemFrame(Level *level, int xTile, int yTile, int zTile, int dir) : HangingEntity( level, xTile, yTile, zTile, dir )
 {
+#ifdef __ORBIS__
+	app.DebugPrintf("ItemFrame::ItemFrame placed begin this=%p level=%p xyz=%d,%d,%d dir=%d bb=%p entityData=%p\n", this, level, xTile, yTile, zTile, dir, bb, getEntityData().get());
+#endif
 	_init();
+#ifdef __ORBIS__
+	app.DebugPrintf("ItemFrame::ItemFrame placed after _init this=%p entityData=%p bb=%p\n", this, getEntityData().get(), bb);
+#endif
 	setDir(dir);
+#ifdef __ORBIS__
+	app.DebugPrintf("ItemFrame::ItemFrame placed after setDir this=%p pos=%f,%f,%f bb=%p\n", this, x, y, z, bb);
+#endif
 }
 
 void ItemFrame::defineSynchedData() 

@@ -93,7 +93,13 @@ public:
 	void readCompressedSkyLightData(DataInputStream *dis);
 	void readCompressedBlockLightData(DataInputStream *dis);
 
-    byteArray heightmap;
+#ifdef __ORBIS__
+private:
+	void ensureOrbisSerializableStorage(const char *caller, bool includeLighting);
+public:
+#endif
+
+	    byteArray heightmap;
     int minHeight;
     int x, z;
 private:

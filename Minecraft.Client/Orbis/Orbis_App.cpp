@@ -12,8 +12,6 @@
 #include "..\..\Minecraft.World\LevelType.h"
 #include "..\..\Orbis\Network\SonyCommerce_Orbis.h"
 #include "..\..\Minecraft.World\StringHelpers.h"
-#include "Network/Orbis_NPToolkit.h"
-#include "Orbis\Network\SonyRemoteStorage_Orbis.h"
 
 #include <system_service.h>
 #include "..\..\Common\Network\Sony\SonyRemoteStorage.h"
@@ -41,7 +39,7 @@ CConsoleMinecraftApp::CConsoleMinecraftApp() : CMinecraftApp()
 
 	m_ProductListA=NULL;
 
-	m_pRemoteStorage = new SonyRemoteStorage_Orbis;
+	m_pRemoteStorage = NULL;
 
 	m_bSaveDataDialogRunning = false;
 	m_bOptionsSaveDataDialogRunning=false;
@@ -50,7 +48,11 @@ CConsoleMinecraftApp::CConsoleMinecraftApp() : CMinecraftApp()
 
 void CConsoleMinecraftApp::SetRichPresenceContext(int iPad, int contextId)
 {
-	ProfileManager.SetRichPresenceContextValue(iPad,CONTEXT_GAME_STATE,contextId);
+	// Raw-save ORBIS builds are currently unstable in the profile/NP layer after
+	// gameplay starts. Rich presence is non-essential, so keep the game alive by
+	// skipping the external profile update entirely on PS4.
+	(void)iPad;
+	(void)contextId;
 }
 
 char *CConsoleMinecraftApp::GetProductCode()
@@ -1068,11 +1070,9 @@ void CConsoleMinecraftApp::SystemServiceTick()
 				{
 				case SCE_SYSTEM_SERVICE_EVENT_GAME_CUSTOM_DATA:
 				{
-					OrbisNPToolkit::getMessageData((SceNpGameCustomDataEventParam*)event.data.param);
-					// Processing after invitation
-					//SceNpSessionInvitationEventParam* pInvite = (SceNpSessionInvitationEventParam*)event.data.param;
-					//SQRNetworkManager_Orbis::GetInviteDataAndProcess(pInvite);
-					break;				
+					// Windows64-style Orbis builds do not consume NP toolkit invite/custom
+					// payloads, so ignore this event instead of entering the PSN flow.
+					break;
 				}
 				case SCE_SYSTEM_SERVICE_EVENT_ON_RESUME:
 					// Resume means that the user signed out (but came back), sensible thing to do is exit to main menu

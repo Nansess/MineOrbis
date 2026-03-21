@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(__PS3__) || defined(__ORBIS__)
+#if defined(__PS3__)
 #include "..\..\Common\Network\Sony\SQRNetworkManager.h"
 #endif
 
@@ -86,8 +86,14 @@ public:
 	SessionID sessionId;
 #ifdef _XBOX
 	XSESSION_SEARCHRESULT searchResult;
-#elif defined(__PS3__) || defined(__ORBIS__) || defined (__PSVITA__)
+#elif defined(__PS3__) || defined (__PSVITA__)
 	SQRNetworkManager::SessionSearchResult searchResult;
+#elif defined(__ORBIS__)
+	struct
+	{
+		SessionID m_sessionId;
+		void *m_extData;
+	} searchResult;
 #elif defined(_DURANGO)
 	DQRNetworkManager::SessionSearchResult searchResult;
 #endif

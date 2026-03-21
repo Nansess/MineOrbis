@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "UI.h"
 #include "UIScene_InGameInfoMenu.h"
+#include "..\ProfileModeShim.h"
 #include "..\..\MultiPlayerLocalPlayer.h"
 #include "..\..\..\Minecraft.World\net.minecraft.network.packet.h"
 #include "..\..\MultiPlayerLocalPlayer.h"
@@ -10,6 +11,7 @@ UIScene_InGameInfoMenu::UIScene_InGameInfoMenu(int iPad, void *initData, UILayer
 {
 	// Setup all the Iggy references we need for this scene
 	initialiseMovie();
+	m_bIgnoreInput = false;
 
 	m_buttonGameOptions.init(app.GetString(IDS_HOST_OPTIONS),eControl_GameOptions);
 	m_labelTitle.init(app.GetString(IDS_PLAYERS_INVITE));
@@ -351,7 +353,7 @@ void UIScene_InGameInfoMenu::handleInput(int iPad, int key, bool repeat, bool pr
 		{
 #ifdef __PS3__
 			// are we offline?
-			if(!ProfileManager.IsSignedInLive(iPad))
+			if(!GameIsSignedInLive(iPad))
 			{
 				// get them to sign in to online
 				UINT uiIDA[2];
@@ -363,7 +365,7 @@ void UIScene_InGameInfoMenu::handleInput(int iPad, int key, bool repeat, bool pr
 #endif
 			{
 #ifdef __ORBIS__
-				SQRNetworkManager_Orbis::RecvInviteGUI();
+				m_bIgnoreInput = false;
 #else // __PS3__
 				int ret = sceNpBasicRecvMessageCustom(SCE_NP_BASIC_MESSAGE_MAIN_TYPE_INVITE, SCE_NP_BASIC_RECV_MESSAGE_OPTIONS_INCLUDE_BOOTABLE, SYS_MEMORY_CONTAINER_ID_INVALID);
 				app.DebugPrintf("sceNpBasicRecvMessageCustom return %d ( %08x )\n", ret, ret);
@@ -588,10 +590,10 @@ int UIScene_InGameInfoMenu::ViewInvites_SignInReturned(void *pParam,bool bContin
 	if(bContinue==true)
 	{
 		// Check if we're signed in to LIVE
-		if(ProfileManager.IsSignedInLive(iPad))
+		if(GameIsSignedInLive(iPad))
 		{
 #ifdef __ORBIS__
-			SQRNetworkManager_Orbis::RecvInviteGUI();
+			((UIScene_InGameInfoMenu*)pParam)->m_bIgnoreInput = false;
 #elif defined(__PS3__)
 			int ret = sceNpBasicRecvMessageCustom(SCE_NP_BASIC_MESSAGE_MAIN_TYPE_INVITE, SCE_NP_BASIC_RECV_MESSAGE_OPTIONS_INCLUDE_BOOTABLE, SYS_MEMORY_CONTAINER_ID_INVALID);
 			app.DebugPrintf("sceNpBasicRecvMessageCustom return %d ( %08x )\n", ret, ret);

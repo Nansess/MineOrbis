@@ -51,7 +51,17 @@ BlockRegionUpdatePacket::BlockRegionUpdatePacket(int x, int y, int z, int xs, in
 		bIsFullChunk = true;
 
 		LevelChunk *lc = level->getChunkAt(x,z);
-		rawBuffer = lc->getReorderedBlocksAndData(x&0xF, y, z&0xF, xs, this->ys, zs);
+#ifdef __ORBIS__
+		if( lc == NULL )
+		{
+			app.DebugPrintf("BlockRegionUpdatePacket missing full chunk at %d,%d\n", x >> 4, z >> 4);
+			rawBuffer = byteArray();
+		}
+		else
+#endif
+		{
+			rawBuffer = lc->getReorderedBlocksAndData(x&0xF, y, z&0xF, xs, this->ys, zs);
+		}
 	}
 	else
 	{
@@ -154,4 +164,3 @@ int BlockRegionUpdatePacket::getEstimatedSize()
 {
 	return 17 + size;
 }
-

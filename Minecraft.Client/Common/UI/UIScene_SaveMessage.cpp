@@ -141,13 +141,11 @@ void UIScene_SaveMessage::handleTimerComplete(int id)
 				// set defaults - which has already been done				
 				killTimer(PROFILE_LOADED_TIMER_ID);
 				ui.NavigateToHomeMenu();
-				SQRNetworkManager::SafeToRespondToGameBootInvite();
 				app.SetOptionsCallbackStatus(0,C4JStorage::eOptions_Callback_Idle);
 				break;
 			case C4JStorage::eOptions_Callback_Read_CorruptDeleted:
 				killTimer(PROFILE_LOADED_TIMER_ID);
 				ui.NavigateToHomeMenu();
-				SQRNetworkManager::SafeToRespondToGameBootInvite();
 				app.SetOptionsCallbackStatus(0,C4JStorage::eOptions_Callback_Idle);
 				break;
 			case C4JStorage::eOptions_Callback_Read_Corrupt:

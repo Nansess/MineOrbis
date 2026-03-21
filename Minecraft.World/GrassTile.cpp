@@ -10,6 +10,13 @@
 #include "IntBuffer.h"
 #include "..\Minecraft.Client\Tesselator.h"
 
+static int getGrassMappedColor(eMinecraftColour colourId, int fallbackColour)
+{
+	Minecraft *minecraft = Minecraft::GetInstance();
+	ColourTable *colourTable = minecraft != NULL ? minecraft->getColourTable() : NULL;
+	return colourTable != NULL ? colourTable->getColor(colourId) : fallbackColour;
+}
+
 GrassTile::GrassTile(int id) : Tile(id, Material::grass)
 {
 	iconTop = NULL;
@@ -51,7 +58,7 @@ int GrassTile::getColor() const
 
     //return GrassColor::get(temp, rain);
 
-	return Minecraft::GetInstance()->getColourTable()->getColor( eMinecraftColour_Grass_Common );
+	return getGrassMappedColor(eMinecraftColour_Grass_Common, 0x48b518);
 }
 
 int GrassTile::getColor(int auxData)

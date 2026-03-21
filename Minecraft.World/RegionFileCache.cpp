@@ -5,16 +5,9 @@
 
 RegionFileCache RegionFileCache::s_defaultCache;
 
-bool RegionFileCache::useSplitSaves(ESavePlatform platform)
+bool RegionFileCache::useSplitSaves(ConsoleSaveFile *saveFile)
 {
-	switch(platform)
-	{
-	case SAVE_FILE_PLATFORM_XBONE:
-	case SAVE_FILE_PLATFORM_PS4:
-		return true;
-	default:
-		return false;
-	};
+	return saveFile != NULL && saveFile->usesSplitSaves();
 }
 
 RegionFile *RegionFileCache::_getRegionFile(ConsoleSaveFile *saveFile, const wstring &prefix, int chunkX, int chunkZ)		// 4J - TODO was synchronized
@@ -28,7 +21,7 @@ RegionFile *RegionFileCache::_getRegionFile(ConsoleSaveFile *saveFile, const wst
 	//File file(regionDir, wstring(L"r.") + _toString(chunkX>>5) + L"." + _toString(chunkZ>>5) + L".mcr" );
 	MemSect(31);
 	File file;
-	if(useSplitSaves(saveFile->getSavePlatform()))
+	if(useSplitSaves(saveFile))
 	{
 		file = File( prefix + wstring(L"r.") + _toString(chunkX>>4) + L"." + _toString(chunkZ>>4) + L".mcr" );
 	}
@@ -96,7 +89,7 @@ int RegionFileCache::_getSizeDelta(ConsoleSaveFile *saveFile, const wstring &pre
 DataInputStream *RegionFileCache::_getChunkDataInputStream(ConsoleSaveFile *saveFile, const wstring &prefix, int chunkX, int chunkZ)
 {
 	RegionFile* r = _getRegionFile(saveFile, prefix, chunkX, chunkZ);
-	if(useSplitSaves(saveFile->getSavePlatform()))
+	if(useSplitSaves(saveFile))
 	{
 		return r->getChunkDataInputStream(chunkX & 15, chunkZ & 15);
 	}
@@ -110,7 +103,7 @@ DataInputStream *RegionFileCache::_getChunkDataInputStream(ConsoleSaveFile *save
 DataOutputStream *RegionFileCache::_getChunkDataOutputStream(ConsoleSaveFile *saveFile, const wstring &prefix, int chunkX, int chunkZ)
 {
 	RegionFile* r = _getRegionFile(saveFile, prefix, chunkX, chunkZ);
-	if(useSplitSaves(saveFile->getSavePlatform()))
+	if(useSplitSaves(saveFile))
 	{
 		return r->getChunkDataOutputStream(chunkX & 15, chunkZ & 15);
 	}

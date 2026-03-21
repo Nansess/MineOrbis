@@ -285,12 +285,12 @@ __int64 ConsoleSchematicFile::applyBlocksAndData(LevelChunk *chunk, AABB *chunkB
 	PIXBeginNamedEvent(0,"Setting Block data");
 	chunk->setBlockData(blockData);
 	PIXEndNamedEvent();
-	delete blockData.data;
+	delete [] blockData.data;
 	chunk->recalcHeightmapOnly();
 	PIXBeginNamedEvent(0,"Setting Data data");
 	chunk->setDataData(dataData);
 	PIXEndNamedEvent();
-	delete dataData.data;
+	delete [] dataData.data;
 
 	// A basic pass through to roughly do the lighting. At this point of post-processing, we don't have all the neighbouring chunks loaded in,
 	// so any lighting here should be things that won't propagate out of this chunk.
@@ -788,6 +788,46 @@ void ConsoleSchematicFile::getBlocksAndData(LevelChunk *chunk, byteArray *data, 
 		bHasUpper = true;
 	}
 
+#ifdef __ORBIS__
+	if( chunk == NULL )
+	{
+		int blockLen = 0;
+		int nibbleLen = 0;
+		for (int x = x0; x < x1; x++)
+			for (int z = z0; z < z1; z++)
+			{
+				if(bHasLower)
+				{
+					blockLen += lowerY1 - lowerY0;
+					nibbleLen += (lowerY1 - lowerY0) / 2;
+				}
+				if(bHasUpper)
+				{
+					blockLen += upperY1 - upperY0;
+					nibbleLen += (upperY1 - upperY0) / 2;
+				}
+			}
+
+		app.DebugPrintf("ConsoleSchematicFile::getBlocksAndData missing chunk region=(%d,%d,%d)->(%d,%d,%d)\n",
+			x0, y0, z0, x1, y1, z1);
+		memset(data->data + blocksP, 0, blockLen);
+		memset(data->data + dataP, 0, nibbleLen);
+		blocksP += blockLen;
+		dataP += nibbleLen;
+		if(blockLightP > -1)
+		{
+			memset(data->data + blockLightP, 0, nibbleLen);
+			blockLightP += nibbleLen;
+		}
+		if(skyLightP > -1)
+		{
+			memset(data->data + skyLightP, 0, nibbleLen);
+			skyLightP += nibbleLen;
+		}
+		return;
+	}
+#endif
+
 	byteArray blockData = byteArray(Level::CHUNK_TILE_COUNT);
 	chunk->getBlockData(blockData);
 	for (int x = x0; x < x1; x++)
@@ -808,7 +848,7 @@ void ConsoleSchematicFile::getBlocksAndData(LevelChunk *chunk, byteArray *data, 
 				blocksP += len;
 			}
 		}
-	delete blockData.data;
+	delete [] blockData.data;
 
 	byteArray dataData = byteArray(Level::CHUNK_TILE_COUNT);
 	chunk->getDataData(dataData);
@@ -830,7 +870,7 @@ void ConsoleSchematicFile::getBlocksAndData(LevelChunk *chunk, byteArray *data, 
 				dataP += len;
 			}
 		}
-	delete dataData.data;
+	delete [] dataData.data;
 
 	// 4J Stu - Allow ignoring light data
 	if(blockLightP > -1)
@@ -855,7 +895,7 @@ void ConsoleSchematicFile::getBlocksAndData(LevelChunk *chunk, byteArray *data, 
 					blockLightP += len;
 				}
 			}
-			delete blockLightData.data;
+			delete [] blockLightData.data;
 	}
 
 
@@ -882,7 +922,7 @@ void ConsoleSchematicFile::getBlocksAndData(LevelChunk *chunk, byteArray *data, 
 					skyLightP += len;
 				}
 			}
-			delete skyLightData.data;
+			delete [] skyLightData.data;
 	}
 
 	return;
@@ -974,7 +1014,7 @@ void ConsoleSchematicFile::setBlocksAndData(LevelChunk *chunk, byteArray blockDa
 				}
 			}
 		chunk->setBlockLightData(blockLightData);
-		delete blockLightData.data;
+		delete [] blockLightData.data;
 	}
 
 	// 4J Stu - Allow ignoring light data
@@ -1001,13 +1041,21 @@ void ConsoleSchematicFile::setBlocksAndData(LevelChunk *chunk, byteArray blockDa
 				}
 			}
 			chunk->setSkyLightData(skyLightData);
-			delete skyLightData.data;
+			delete [] skyLightData.data;
 	}
 }
 
 vector<shared_ptr<TileEntity> > *ConsoleSchematicFile::getTileEntitiesInRegion(LevelChunk *chunk, int x0, int y0, int z0, int x1, int y1, int z1)
 {
 	vector<shared_ptr<TileEntity> > *result = new vector<shared_ptr<TileEntity> >;
+#ifdef __ORBIS__
+	if( chunk == NULL )
+	{
+		app.DebugPrintf("ConsoleSchematicFile::getTileEntitiesInRegion missing chunk region=(%d,%d,%d)->(%d,%d,%d)\n",
+			x0, y0, z0, x1, y1, z1);
+		return result;
+	}
+#endif
 	for (AUTO_VAR(it, chunk->tileEntities.begin()); it != chunk->tileEntities.end(); ++it)
 	{
 		shared_ptr<TileEntity> te = it->second;

@@ -4,6 +4,9 @@
 #include "File.h"
 #include <xuiapp.h>
 #include "compression.h"
+#ifdef __ORBIS__
+#include "..\Minecraft.Client\Common\zlib\zlib.h"
+#endif
 #include "..\Minecraft.Client\Minecraft.h"
 #include "..\Minecraft.Client\MinecraftServer.h"
 #include "..\Minecraft.Client\ServerLevel.h"
@@ -70,6 +73,10 @@ ConsoleSaveFileOriginal::ConsoleSaveFileOriginal(const wstring &fileName, LPVOID
 	pvSaveMem = pvHeap;
 	m_fileName = fileName;
 	bool freeInputSaveData = false;
+
+#ifdef __ORBIS__
+	app.DebugPrintf("*** ORBIS ConsoleSaveFileOriginal ctor for %S plat=%08x\n", m_fileName.c_str(), plat);
+#endif
 
 	DWORD fileSize = dFileSize;
 
@@ -377,8 +384,8 @@ void ConsoleSaveFileOriginal::PrepareForWrite( FileEntry *file, DWORD nNumberOfB
 	if( bytesToGrowBy <= 0 )
 		return;
 
-	app.DebugPrintf("PrepareForWrite: file=%ls, currentPtr=%I64d, startOffset=%I64d, fileSize=%I64d, growBy=%d, pagesCommitted=%u\n",
-		file->data.filename, file->currentFilePointer, (LONG64)file->data.startOffset, (LONG64)file->getFileSize(), bytesToGrowBy, pagesCommitted);
+	// app.DebugPrintf("PrepareForWrite: file=%ls, currentPtr=%I64d, startOffset=%I64d, fileSize=%I64d, growBy=%d, pagesCommitted=%u\n",
+	//	file->data.filename, file->currentFilePointer, (LONG64)file->data.startOffset, (LONG64)file->getFileSize(), bytesToGrowBy, pagesCommitted);
 
 	// 4J Stu - Not forcing a minimum size, it is up to the caller to write data in sensible amounts
 	// This lets us keep some of the smaller files small
@@ -407,9 +414,9 @@ BOOL ConsoleSaveFileOriginal::writeFile(FileEntry *file,LPCVOID lpBuffer, DWORD 
 
 	LockSaveAccess();
 
-	// Extra diagnostic logging to help track down null/dangling pointers during saves
-	app.DebugPrintf("writeFile: file=%ls, currentPtr=%I64d, startOffset=%I64d, fileSize=%I64d, writeBytes=%u, pvSaveMem=%p\n",
-		file ? file->data.filename : L"<null>", file ? file->currentFilePointer : 0, file ? (LONG64)file->data.startOffset : 0, file ? (LONG64)file->getFileSize() : 0, nNumberOfBytesToWrite, pvSaveMem);
+	// Extra diagnostic logging to help track down null/dangling pointers during saves.
+	// app.DebugPrintf("writeFile: file=%ls, currentPtr=%I64d, startOffset=%I64d, fileSize=%I64d, writeBytes=%u, pvSaveMem=%p\n",
+	//	file ? file->data.filename : L"<null>", file ? file->currentFilePointer : 0, file ? (LONG64)file->data.startOffset : 0, file ? (LONG64)file->getFileSize() : 0, nNumberOfBytesToWrite, pvSaveMem);
 
 	PrepareForWrite( file, nNumberOfBytesToWrite );
 
@@ -714,7 +721,12 @@ void ConsoleSaveFileOriginal::Flush(bool autosave, bool updateThumbnail )
 	// Assume that the compression will make it smaller so initially attempt to allocate the current file size
 	// We add 4 bytes to the start so that we can signal compressed data
 	// And another 4 bytes to store the decompressed data size
+#ifdef __ORBIS__
+	unsigned int compLength = (unsigned int)compressBound((uLong)fileSize)+8;
+#else
 	unsigned int compLength = fileSize+8;
+#endif
+	unsigned int requestedCompLength = compLength;
 
 	// 4J Stu - Added TU-1 interim
 
@@ -727,7 +739,7 @@ void ConsoleSaveFileOriginal::Flush(bool autosave, bool updateThumbnail )
 	// Attempt to allocate the required memory
 	// We do not own this, it belongs to the StorageManager
 #ifdef __ORBIS__
-	byte *compData = NULL;
+	byte *compData = new byte[compLength];
 #else
 	byte *compData = (byte *)StorageManager.AllocateSaveData( compLength );
 #endif
@@ -740,6 +752,7 @@ void ConsoleSaveFileOriginal::Flush(bool autosave, bool updateThumbnail )
 
 	// If we failed to allocate then compData will be NULL
 	// Pre-calculate the compressed data size so that we can attempt to allocate a smaller buffer
+#ifndef __ORBIS__
 	if(compData == NULL)
 	{
 		// Length should be 0 here so that the compression call knows that we want to know the length back
@@ -766,6 +779,7 @@ void ConsoleSaveFileOriginal::Flush(bool autosave, bool updateThumbnail )
 		// We add 4 bytes to the start so that we can signal compressed data
 		// And another 4 bytes to store the decompressed data size
 		compLength = compLength+8;
+		requestedCompLength = compLength;
 
 		// Attempt to allocate the required memory
 #ifdef __ORBIS__
@@ -774,6 +788,7 @@ void ConsoleSaveFileOriginal::Flush(bool autosave, bool updateThumbnail )
 		compData = (byte *)StorageManager.AllocateSaveData( compLength );
 #endif
 	}
+#endif
 #endif
 
 	if(compData != NULL)
@@ -788,7 +803,7 @@ void ConsoleSaveFileOriginal::Flush(bool autosave, bool updateThumbnail )
 		// AP - compress via the access function. This uses a special RLE format
 		VirtualCompress(compData+8,&compLength,pvSaveMem,fileSize);
 #else
-		Compression::getCompression()->Compress(compData+8,&compLength,pvSaveMem,fileSize);
+		HRESULT compressResult = Compression::getCompression()->Compress(compData+8,&compLength,pvSaveMem,fileSize);
 #endif
 		QueryPerformanceCounter( &qwNewTime );
 
@@ -797,6 +812,29 @@ void ConsoleSaveFileOriginal::Flush(bool autosave, bool updateThumbnail )
 
 		app.DebugPrintf("Compress: Elapsed time %f\n", fElapsedTime);
 		PIXEndNamedEvent();
+
+#ifndef __PSVITA__
+		if(compressResult != S_OK)
+		{
+#ifdef __ORBIS__
+			app.DebugPrintf("ConsoleSaveFileOriginal::Flush - compression failed hr=0x%08x fileSize=%u requested=%u\n",
+				compressResult, fileSize, requestedCompLength);
+#endif
+			delete [] compData;
+			ReleaseSaveAccess();
+			return;
+		}
+#endif
+
+		if(compLength == 0 && fileSize != 0)
+		{
+#ifdef __ORBIS__
+			app.DebugPrintf("ConsoleSaveFileOriginal::Flush - compression returned 0 bytes for fileSize=%u, aborting save\n", fileSize);
+#endif
+			delete [] compData;
+			ReleaseSaveAccess();
+			return;
+		}
 
 		ZeroMemory(compData,8);
 		int saveVer = 0;
@@ -1016,6 +1054,11 @@ vector<FileEntry *> *ConsoleSaveFileOriginal::getFilesWithPrefix(const wstring &
 vector<FileEntry *> *ConsoleSaveFileOriginal::getRegionFilesByDimension(unsigned int dimensionIndex)
 {
 	return NULL;
+}
+
+bool ConsoleSaveFileOriginal::usesSplitSaves()
+{
+	return false;
 }
 
 #if defined(__PS3__) || defined(__ORBIS__) || defined(__PSVITA__)

@@ -31,5 +31,5 @@ public:
     static DataOutputStream *getChunkDataOutputStream(ConsoleSaveFile *saveFile, const wstring &prefix, int chunkX, int chunkZ)		{ return s_defaultCache._getChunkDataOutputStream(saveFile, prefix, chunkX, chunkZ); }
 
 private:
-	bool useSplitSaves(ESavePlatform platform);
+	bool useSplitSaves(ConsoleSaveFile *saveFile);
 };

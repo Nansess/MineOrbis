@@ -4,6 +4,7 @@
 #include "..\..\..\Minecraft.World\Random.h"
 #include "..\..\User.h"
 #include "..\..\MinecraftServer.h"
+#include "..\ProfileModeShim.h"
 #include "UI.h"
 #include "UIScene_MainMenu.h"
 #ifdef __ORBIS__
@@ -12,12 +13,22 @@
 
 Random *UIScene_MainMenu::random = new Random();
 
+#ifdef __ORBIS__
+static void EnsureOrbisOfflineFullVersionMode()
+{
+	ProfileManager.SetDebugFullOverride(true);
+	ProfileManager.SetFullVersion(true);
+	StorageManager.SetSaveDisabled(false);
+}
+#endif
+
 UIScene_MainMenu::UIScene_MainMenu(int iPad, void *initData, UILayer *parentLayer) : UIScene(iPad, parentLayer)
 {
 #ifdef __ORBIS
 	//m_ePatchCheckState=ePatchCheck_Idle;
 	m_bRunGameChosen=false;
 	m_bErrorDialogRunning=false;
+	EnsureOrbisOfflineFullVersionMode();
 #endif
 
 
@@ -287,14 +298,9 @@ void UIScene_MainMenu::handlePress(F64 controlId, F64 childId)
 	{
 	case eControl_PlayGame:
 #ifdef __ORBIS__
-		{
-			m_bIgnorePress=true;
-
-			//CD - Added for audio
-			ui.PlayUISFX(eSFX_Press);
-
-			ProfileManager.RefreshChatAndContentRestrictions(RefreshChatAndContentRestrictionsReturned_PlayGame, this);
-		}
+		m_eAction=eAction_RunGame;
+		ui.PlayUISFX(eSFX_Press);
+		signInReturnedFunc = &UIScene_MainMenu::CreateLoad_SignInReturned;
 #else
 		m_eAction=eAction_RunGame;
 		//CD - Added for audio
@@ -370,7 +376,7 @@ void UIScene_MainMenu::handlePress(F64 controlId, F64 childId)
 	// Note: if no sign in returned func, assume this isn't required
 	if (signInReturnedFunc != NULL)
 	{
-		if(ProfileManager.IsSignedIn(primaryPad))
+		if(GameHasUsableLocalProfile(primaryPad))
 		{
 			if (confirmUser)
 			{
@@ -383,11 +389,15 @@ void UIScene_MainMenu::handlePress(F64 controlId, F64 childId)
 		}
 		else
 		{
+#ifdef __ORBIS__
+			RunAction(primaryPad);
+#else
 			// Ask user to sign in
 			UINT uiIDA[2];
 			uiIDA[0]=IDS_CONFIRM_OK;
 			uiIDA[1]=IDS_CONFIRM_CANCEL;
 			ui.RequestMessageBox(IDS_MUST_SIGN_IN_TITLE, IDS_MUST_SIGN_IN_TEXT, uiIDA, 2, primaryPad, &UIScene_MainMenu::MustSignInReturned, this, app.GetStringTable());
+#endif
 		}
 	}
 }
@@ -570,13 +580,13 @@ int UIScene_MainMenu::MustSignInReturnedPSN(void *pParam,int iPad,C4JStorage::EM
 		switch(pClass->m_eAction)
 		{
 		case eAction_RunLeaderboardsPSN:
-			SQRNetworkManager_Orbis::AttemptPSNSignIn(&UIScene_MainMenu::Leaderboards_SignInReturned, pClass, true, iPad);
+			UIScene_MainMenu::Leaderboards_SignInReturned(pClass, true, iPad);
 			break;
 		case eAction_RunGamePSN:
-			SQRNetworkManager_Orbis::AttemptPSNSignIn(&UIScene_MainMenu::CreateLoad_SignInReturned, pClass, true, iPad);
+			UIScene_MainMenu::CreateLoad_SignInReturned(pClass, true, iPad);
 			break;
 		case eAction_RunUnlockOrDLCPSN:
-			SQRNetworkManager_Orbis::AttemptPSNSignIn(&UIScene_MainMenu::UnlockFullGame_SignInReturned, pClass, true, iPad);
+			UIScene_MainMenu::UnlockFullGame_SignInReturned(pClass, true, iPad);
 			break;
 		}
 
@@ -690,11 +700,14 @@ int UIScene_MainMenu::CreateLoad_SignInReturned(void *pParam, bool bContinue, in
 
 
 			// change the minecraft player name
-			Minecraft::GetInstance()->user->name = convStringToWstring( ProfileManager.GetGamertag(ProfileManager.GetPrimaryPad()));
+			Minecraft::GetInstance()->user->name = GameGetLocalDisplayName(ProfileManager.GetPrimaryPad());
 
+#ifdef __ORBIS__
+			EnsureOrbisOfflineFullVersionMode();
+#endif
 			if(ProfileManager.IsFullVersion())
 			{
-				bool bSignedInLive = ProfileManager.IsSignedInLive(iPad);
+				bool bSignedInLive = GameHasOnlineServices(iPad);
 #ifdef __PSVITA__
 				if(CGameNetworkManager::usingAdhocMode())
 				{
@@ -706,7 +719,7 @@ int UIScene_MainMenu::CreateLoad_SignInReturned(void *pParam, bool bContinue, in
 					{
 						// adhoc mode, but we didn't make the connection, turn off adhoc mode, and just go with whatever the regular online status is
 						CGameNetworkManager::setAdhocMode(false);
-						bSignedInLive = ProfileManager.IsSignedInLive(iPad);
+						bSignedInLive = GameHasOnlineServices(iPad);
 					}
 				}
 #endif
@@ -730,7 +743,7 @@ int UIScene_MainMenu::CreateLoad_SignInReturned(void *pParam, bool bContinue, in
 						if(app.GetBanListRead(iPad))
 						{
 							Minecraft *pMinecraft=Minecraft::GetInstance();
-							pMinecraft->user->name = convStringToWstring( ProfileManager.GetGamertag(ProfileManager.GetPrimaryPad()));
+							pMinecraft->user->name = GameGetLocalDisplayName(ProfileManager.GetPrimaryPad());
 
 							// ensure we've applied this player's settings
 							app.ApplyGameSettingsChanged(iPad);
@@ -793,7 +806,7 @@ int UIScene_MainMenu::CreateLoad_SignInReturned(void *pParam, bool bContinue, in
 						}
 #else
 						Minecraft *pMinecraft=Minecraft::GetInstance();
-						pMinecraft->user->name = convStringToWstring( ProfileManager.GetGamertag(ProfileManager.GetPrimaryPad()));
+						pMinecraft->user->name = GameGetLocalDisplayName(ProfileManager.GetPrimaryPad());
 
 						// ensure we've applied this player's settings
 						app.ApplyGameSettingsChanged(iPad);
@@ -883,7 +896,7 @@ int UIScene_MainMenu::Leaderboards_SignInReturned(void *pParam,bool bContinue,in
 			pClass->m_bIgnorePress=false;
 			ui.RequestMessageBox(IDS_PRO_GUESTPROFILE_TITLE, IDS_PRO_GUESTPROFILE_TEXT, uiIDA, 1);
 		}
-		else if(!ProfileManager.IsSignedInLive(ProfileManager.GetPrimaryPad()))
+		else if(!GameIsSignedInLive(ProfileManager.GetPrimaryPad()))
 		{
 			pClass->m_bIgnorePress=false;
 			ui.RequestMessageBox(IDS_PRO_NOTONLINE_TITLE, IDS_PRO_XBOXLIVE_NOTIFICATION, uiIDA, 1);
@@ -1045,7 +1058,7 @@ void UIScene_MainMenu::RefreshChatAndContentRestrictionsReturned_PlayGame(void *
 	int (*signInReturnedFunc) (LPVOID,const bool, const int iPad) = NULL;
 
 	// 4J-PB - Check if there is a patch for the game
-	pClass->m_errorCode = ProfileManager.getNPAvailability(ProfileManager.GetPrimaryPad());
+	pClass->m_errorCode = GameGetNPAvailability(ProfileManager.GetPrimaryPad());
 
 	bool bPatchAvailable;
 	switch(pClass->m_errorCode)
@@ -1134,7 +1147,7 @@ void UIScene_MainMenu::RefreshChatAndContentRestrictionsReturned_Leaderboards(vo
 	int (*signInReturnedFunc) (LPVOID,const bool, const int iPad) = NULL;
 
 	// 4J-PB - Check if there is a patch for the game
-	pClass->m_errorCode = ProfileManager.getNPAvailability(ProfileManager.GetPrimaryPad());
+	pClass->m_errorCode = GameGetNPAvailability(ProfileManager.GetPrimaryPad());
 
 	bool bPatchAvailable;
 	switch(pClass->m_errorCode)
@@ -1178,7 +1191,7 @@ void UIScene_MainMenu::RefreshChatAndContentRestrictionsReturned_Leaderboards(vo
 	bool confirmUser = false;
 
 	// Update error code
-	pClass->m_errorCode = ProfileManager.getNPAvailability(ProfileManager.GetPrimaryPad());
+	pClass->m_errorCode = GameGetNPAvailability(ProfileManager.GetPrimaryPad());
 
 	// Check if PSN is unavailable because of age restriction
 	if (pClass->m_errorCode == SCE_NP_ERROR_AGE_RESTRICTION)
@@ -1266,10 +1279,13 @@ void UIScene_MainMenu::RunPlayGame(int iPad)
 		// 4J-PB - Need to check for installed DLC
 		if(!app.DLCInstallProcessCompleted()) app.StartInstallDLCProcess(iPad);
 
+#ifdef __ORBIS__
+		EnsureOrbisOfflineFullVersionMode();
+#endif
 		if(ProfileManager.IsFullVersion())
 		{
 			// are we offline?
-			bool bSignedInLive = ProfileManager.IsSignedInLive(iPad);
+			bool bSignedInLive = GameIsSignedInLive(iPad);
 #ifdef __PSVITA__
 			if(app.GetGameSettings(ProfileManager.GetPrimaryPad(),eGameSetting_PSVita_NetworkModeAdhoc) == true)
 			{
@@ -1292,7 +1308,7 @@ void UIScene_MainMenu::RunPlayGame(int iPad)
 				m_bIgnorePress=false;
 
 				// Not sure why 360 doesn't need this, but leaving as __PS3__ only for now until we see that it does. Without this, on a PS3 offline game, the primary player just gets the default Player1234 type name
-				pMinecraft->user->name = convStringToWstring( ProfileManager.GetGamertag(ProfileManager.GetPrimaryPad()));
+				pMinecraft->user->name = GameGetLocalDisplayName(ProfileManager.GetPrimaryPad());
 
 				m_eAction=eAction_RunGamePSN;
 				// get them to sign in to online
@@ -1397,7 +1413,7 @@ void UIScene_MainMenu::RunPlayGame(int iPad)
 					if(StorageManager.SetSaveDevice(&CScene_Main::DeviceSelectReturned,this)==true)
 					{
 						// change the minecraft player name
-						pMinecraft->user->name = convStringToWstring( ProfileManager.GetGamertag(ProfileManager.GetPrimaryPad()));
+						pMinecraft->user->name = GameGetLocalDisplayName(ProfileManager.GetPrimaryPad());
 						// save device already selected
 
 						// ensure we've applied this player's settings
@@ -1427,7 +1443,7 @@ void UIScene_MainMenu::RunPlayGame(int iPad)
 					m_Timer.SetShow(TRUE);
 				}
 #else
-				pMinecraft->user->name = convStringToWstring( ProfileManager.GetGamertag(ProfileManager.GetPrimaryPad()));
+				pMinecraft->user->name = GameGetLocalDisplayName(ProfileManager.GetPrimaryPad());
 
 				// ensure we've applied this player's settings
 				app.ApplyGameSettingsChanged(iPad);
@@ -1444,7 +1460,7 @@ void UIScene_MainMenu::RunPlayGame(int iPad)
 			// 4J-PB - if this is the trial game, we can't have any networking
 			// go straight in to the trial level
 			// change the minecraft player name
-			Minecraft::GetInstance()->user->name = convStringToWstring( ProfileManager.GetGamertag(ProfileManager.GetPrimaryPad()));
+			Minecraft::GetInstance()->user->name = GameGetLocalDisplayName(ProfileManager.GetPrimaryPad());
 
 			// Can't apply the player's settings here - they haven't come back from the QuerySignInStatud call above yet.
 			// Need to let them action in the main loop when they come in
@@ -1481,7 +1497,7 @@ void UIScene_MainMenu::RunLeaderboards(int iPad)
 	{
 		ui.RequestMessageBox(IDS_PRO_GUESTPROFILE_TITLE, IDS_PRO_GUESTPROFILE_TEXT, uiIDA, 1);
 	}
-	else if(!ProfileManager.IsSignedInLive(iPad))
+	else if(!GameIsSignedInLive(iPad))
 	{
 #if defined __PS3__ || defined __PSVITA__
 		m_eAction=eAction_RunLeaderboardsPSN;
@@ -1578,7 +1594,7 @@ void UIScene_MainMenu::RunUnlockOrDLC(int iPad)
 	{
 #ifdef __ORBIS__
 		// 4J-PB - Check if there is a patch for the game
-		m_errorCode = ProfileManager.getNPAvailability(ProfileManager.GetPrimaryPad());
+		m_errorCode = GameGetNPAvailability(ProfileManager.GetPrimaryPad());
 
 		bool bPatchAvailable;
 		switch(m_errorCode)
@@ -1629,7 +1645,7 @@ void UIScene_MainMenu::RunUnlockOrDLC(int iPad)
 		}
 #endif
 		// downloadable content
-		if(ProfileManager.IsSignedInLive(iPad))
+		if(GameIsSignedInLive(iPad))
 		{
 			if(ProfileManager.IsGuest(iPad))
 			{
@@ -1744,7 +1760,7 @@ void UIScene_MainMenu::RunUnlockOrDLC(int iPad)
 			m_bIgnorePress=false;
 			ui.RequestMessageBox(IDS_UNLOCK_TITLE, IDS_UNLOCK_GUEST_TEXT, uiIDA, 1,iPad);
 		}
-		else if(!ProfileManager.IsSignedInLive(iPad))
+		else if(!GameIsSignedInLive(iPad))
 		{
 #if defined(__PS3__) || defined(__PSVITA__)
 			m_eAction=eAction_RunUnlockOrDLCPSN;
@@ -1928,7 +1944,7 @@ void UIScene_MainMenu::RunHelpAndOptions(int iPad)
 
 #if TO_BE_IMPLEMENTED
 		// 4J-PB - You can be offline and still can go into help and options
-		if(app.GetTMSDLCInfoRead() || !ProfileManager.IsSignedInLive(iPad))
+		if(app.GetTMSDLCInfoRead() || !GameIsSignedInLive(iPad))
 #endif
 		{
 			ProfileManager.SetLockedProfile(iPad);

@@ -37,6 +37,9 @@ HangingEntity::HangingEntity(Level *level, int xTile, int yTile, int zTile, int 
 
 void HangingEntity::setDir(int dir) 
 {
+#ifdef __ORBIS__
+	app.DebugPrintf("HangingEntity::setDir begin this=%p dir=%d xyzTile=%d,%d,%d bb=%p\n", this, dir, xTile, yTile, zTile, bb);
+#endif
 	this->dir = dir;
 	this->yRotO = this->yRot = (float)(dir * 90);
 
@@ -77,6 +80,18 @@ void HangingEntity::setDir(int dir)
 
 	this->setPos(x, y, z);
 
+	if (bb == NULL)
+	{
+#ifdef __ORBIS__
+		app.DebugPrintf("HangingEntity::setDir repairing null bb this=%p dir=%d\n", this, dir);
+#endif
+		bb = AABB::newPermanent(0, 0, 0, 0, 0, 0);
+		if (bb == NULL)
+		{
+			return;
+		}
+	}
+
 	float ss = -(0.5f / 16.0f);
 
 	// 4J Stu - Due to rotations the bb couold be set with a lower bound x/z being higher than the higher bound
@@ -87,6 +102,9 @@ void HangingEntity::setDir(int dir)
 	float z0 = z - d - ss;
 	float z1 = z + d + ss;
 	bb->set(min(x0,x1), min(y0,y1), min(z0,z1), max(x0,x1), max(y0,y1), max(z0,z1));
+#ifdef __ORBIS__
+	app.DebugPrintf("HangingEntity::setDir end this=%p dir=%d pos=%f,%f,%f bb=%p bounds=%f,%f,%f -> %f,%f,%f\n", this, dir, x, y, z, bb, bb->x0, bb->y0, bb->z0, bb->x1, bb->y1, bb->z1);
+#endif
 }
 
 float HangingEntity::offs(int w) 
@@ -288,5 +306,3 @@ void HangingEntity::readAdditionalSaveData(CompoundTag *tag)
 	zTile = tag->getInt(L"TileZ");
 	setDir(dir);
 }
-
-

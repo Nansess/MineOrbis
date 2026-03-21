@@ -3,6 +3,7 @@
 #include "UIScene_FullscreenProgress.h"
 #include "..\..\Minecraft.h"
 #include "..\..\ProgressRenderer.h"
+#include "..\..\GameRenderer.h"
 
 
 UIScene_FullscreenProgress::UIScene_FullscreenProgress(int iPad, void *initData, UILayer *parentLayer) : UIScene(iPad, parentLayer)
@@ -26,8 +27,29 @@ UIScene_FullscreenProgress::UIScene_FullscreenProgress(int iPad, void *initData,
 
 	m_buttonConfirm.init( app.GetString( IDS_CONFIRM_OK ), eControl_Confirm );
 	m_buttonConfirm.setVisible(false);
+	thread = NULL;
+	m_CompletionData = NULL;
+	threadStarted = false;
+	m_threadCompleted = false;
+	m_iPad = iPad;
+	m_cancelFunc = NULL;
+	m_completeFunc = NULL;
+	m_cancelFuncParam = NULL;
+	m_completeFuncParam = NULL;
+	m_bWasCancelled = false;
 
 	LoadingInputParams *params = (LoadingInputParams *)initData;
+	if(params == NULL || params->completionData == NULL || params->func == NULL)
+	{
+		app.DebugPrintf("UIScene_FullscreenProgress invalid params=%p completion=%p func=%p\n",
+			params, params != NULL ? params->completionData : NULL, params != NULL ? params->func : NULL);
+		m_CompletionData = new UIFullscreenProgressCompletionData();
+		m_CompletionData->iPad = iPad;
+		m_buttonConfirm.setVisible(true);
+		m_threadCompleted = true;
+		updateTooltips();
+		return;
+	}
 
 	m_CompletionData = params->completionData;
 	m_iPad=params->completionData->iPad;
@@ -42,8 +64,11 @@ UIScene_FullscreenProgress::UIScene_FullscreenProgress(int iPad, void *initData,
 
 	// Clear the progress text
 	Minecraft *pMinecraft=Minecraft::GetInstance();
-	pMinecraft->progressRenderer->progressStart(-1);
-	pMinecraft->progressRenderer->progressStage(-1);
+	if(pMinecraft != NULL && pMinecraft->progressRenderer != NULL)
+	{
+		pMinecraft->progressRenderer->progressStart(-1);
+		pMinecraft->progressRenderer->progressStage(-1);
+	}
 	m_progressBar.init(L"",0,0,100,0);
 
 	// set the tip
@@ -61,11 +86,12 @@ UIScene_FullscreenProgress::UIScene_FullscreenProgress(int iPad, void *initData,
 	m_labelTip.setVisible( m_CompletionData->bShowTips );
 
 	thread = new C4JThread(params->func, params->lpParam, "FullscreenProgress");
-	thread->SetProcessor(CPU_CORE_UI_SCENE); // TODO 4J Stu - Make sure this is a good thread/core to use
-
-	m_threadCompleted = false;
-	thread->Run();
-	threadStarted = true;
+	if(thread != NULL)
+	{
+		thread->SetProcessor(CPU_CORE_UI_SCENE); // TODO 4J Stu - Make sure this is a good thread/core to use
+		thread->Run();
+		threadStarted = true;
+	}
 
 #ifdef __PSVITA__
 	ui.TouchBoxRebuild(this);
@@ -81,9 +107,17 @@ UIScene_FullscreenProgress::~UIScene_FullscreenProgress()
 	m_parentLayer->removeComponent(eUIComponent_Panorama);
 	m_parentLayer->removeComponent(eUIComponent_Logo);
 
-	delete thread;
+	if(thread != NULL)
+	{
+		delete thread;
+		thread = NULL;
+	}
 
-	delete m_CompletionData;
+	if(m_CompletionData != NULL)
+	{
+		delete m_CompletionData;
+		m_CompletionData = NULL;
+	}
 }
 
 wstring UIScene_FullscreenProgress::getMoviePath()
@@ -98,6 +132,11 @@ void UIScene_FullscreenProgress::updateTooltips()
 
 void UIScene_FullscreenProgress::handleDestroy()
 {
+	if(thread == NULL)
+	{
+		return;
+	}
+
 	int code = thread->GetExitCode();
 	DWORD exitcode = *((DWORD *)&code);
 
@@ -114,6 +153,10 @@ void UIScene_FullscreenProgress::tick()
 	UIScene::tick();
 
 	Minecraft *pMinecraft=Minecraft::GetInstance();
+	if(thread == NULL || pMinecraft == NULL || pMinecraft->progressRenderer == NULL)
+	{
+		return;
+	}
 
 	int currentProgress = pMinecraft->progressRenderer->getCurrentPercent();
 	if(currentProgress < 0) currentProgress = 0;
@@ -158,6 +201,13 @@ void UIScene_FullscreenProgress::tick()
 
 	if( exitcode != STILL_ACTIVE )
 	{
+#ifdef __ORBIS__
+		if( exitcode == S_OK && pMinecraft->gameRenderer != NULL && pMinecraft->level != NULL )
+		{
+			pMinecraft->gameRenderer->EnableUpdateThread();
+		}
+#endif
+
 		// If we failed (currently used by network connection thread), navigate back
 		if( exitcode != S_OK )
 		{

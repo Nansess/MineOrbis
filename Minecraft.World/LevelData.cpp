@@ -8,6 +8,38 @@
 
 LevelData::LevelData()
 {
+	seed = 0;
+	m_pGenerator = LevelType::lvl_normal;
+	gameType = GameType::SURVIVAL;
+	generateMapFeatures = true;
+	spawnBonusChest = false;
+	xSpawn = 0;
+	ySpawn = 0;
+	zSpawn = 0;
+	time = 0;
+	lastPlayed = 0;
+	sizeOnDisk = 0;
+	dimension = 0;
+	levelName = L"";
+	version = 0;
+	rainTime = 0;
+	raining = false;
+	thunderTime = 0;
+	thundering = false;
+	hardcore = false;
+	allowCommands = false;
+	initialized = false;
+	newSeaLevel = false;
+	hasBeenInCreative = false;
+	bStronghold = false;
+	xStronghold = 0;
+	yStronghold = 0;
+	zStronghold = 0;
+	bStrongholdEndPortal = false;
+	xStrongholdEndPortal = 0;
+	zStrongholdEndPortal = 0;
+	m_xzSize = LEVEL_MIN_WIDTH;
+	m_hellScale = HELL_LEVEL_MIN_SCALE;
 }
 
 LevelData::LevelData(CompoundTag *tag)
@@ -251,6 +283,35 @@ CompoundTag *LevelData::createTag(vector<shared_ptr<Player> > *players)
 
 void LevelData::setTagData(CompoundTag *tag) 
 {
+#ifdef __ORBIS__
+	app.DebugPrintf("LevelData::setTagData - this=%p tag=%p generator=%p gameType=%p levelNameLen=%u version=%d\n",
+		this, tag, m_pGenerator, gameType, (unsigned int)levelName.length(), version);
+#endif
+
+	if(tag == NULL)
+	{
+#ifdef __ORBIS__
+		app.DebugPrintf("LevelData::setTagData - tag is NULL\n");
+#endif
+		return;
+	}
+
+	if(m_pGenerator == NULL)
+	{
+#ifdef __ORBIS__
+		app.DebugPrintf("LevelData::setTagData - generator is NULL, using default\n");
+#endif
+		m_pGenerator = LevelType::lvl_normal;
+	}
+
+	if(gameType == NULL)
+	{
+#ifdef __ORBIS__
+		app.DebugPrintf("LevelData::setTagData - gameType is NULL, using SURVIVAL\n");
+#endif
+		gameType = GameType::SURVIVAL;
+	}
+
     tag->putLong(L"RandomSeed", seed);
 	tag->putString(L"generatorName", m_pGenerator->getGeneratorName());
 	tag->putInt(L"generatorVersion", m_pGenerator->getVersion());

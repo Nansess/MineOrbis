@@ -6,6 +6,7 @@
 #include <assert.h>
 #include "..\..\Minecraft.h"
 #include "..\..\ProgressRenderer.h"
+#include "..\..\GameRenderer.h"
 #include "..\..\..\Minecraft.World\StringHelpers.h"
 #include "..\..\Common\Tutorial\TutorialMode.h"
 
@@ -15,10 +16,31 @@
 HRESULT CScene_FullscreenProgress::OnInit( XUIMessageInit* pInitData, BOOL& bHandled )
 {
 	MapChildControls();
+	thread = NULL;
+	threadStarted = false;
+	m_CompletionData = NULL;
+	m_threadCompleted = false;
+	m_iPad = DEFAULT_XUI_MENU_USER;
+	m_cancelFunc = NULL;
+	m_completeFunc = NULL;
+	m_cancelFuncParam = NULL;
+	m_completeFuncParam = NULL;
+	m_bWasCancelled = false;
 
 	m_buttonConfirm.SetText( app.GetString( IDS_CONFIRM_OK ) );
 
 	LoadingInputParams *params = (LoadingInputParams *)pInitData->pvInitData;
+	if(params == NULL || params->completionData == NULL || params->func == NULL)
+	{
+		app.DebugPrintf("CScene_FullscreenProgress::OnInit invalid params=%p completion=%p func=%p\n",
+			params, params != NULL ? params->completionData : NULL, params != NULL ? params->func : NULL);
+		m_CompletionData = new UIFullscreenProgressCompletionData();
+		m_CompletionData->iPad = DEFAULT_XUI_MENU_USER;
+		m_threadCompleted = true;
+		m_buttonConfirm.SetShow(TRUE);
+		m_tip.SetShow(FALSE);
+		return S_OK;
+	}
 
 	m_CompletionData = params->completionData;
 	m_iPad=params->completionData->iPad;
@@ -29,10 +51,10 @@ HRESULT CScene_FullscreenProgress::OnInit( XUIMessageInit* pInitData, BOOL& bHan
 	m_bWasCancelled=false;
 
 	thread = new C4JThread(params->func, params->lpParam, "FullscreenProgress");
-	thread->SetProcessor(3); // TODO 4J Stu - Make sure this is a good thread/core to use
-
-	m_threadCompleted = false;
-	threadStarted = false;
+	if(thread != NULL)
+	{
+		thread->SetProcessor(3); // TODO 4J Stu - Make sure this is a good thread/core to use
+	}
 	//ResumeThread( thread );
 	if( CXuiSceneBase::GetPlayerBasePosition(m_iPad) != CXuiSceneBase::e_BaseScene_Fullscreen && CXuiSceneBase::GetPlayerBasePosition(m_iPad) != CXuiSceneBase::e_BaseScene_NotSet)
 	{
@@ -49,8 +71,11 @@ HRESULT CScene_FullscreenProgress::OnInit( XUIMessageInit* pInitData, BOOL& bHan
 
 	// Clear the progress text
 	Minecraft *pMinecraft=Minecraft::GetInstance();
-	pMinecraft->progressRenderer->progressStart(-1);
-	pMinecraft->progressRenderer->progressStage(-1);
+	if(pMinecraft != NULL && pMinecraft->progressRenderer != NULL)
+	{
+		pMinecraft->progressRenderer->progressStart(-1);
+		pMinecraft->progressRenderer->progressStage(-1);
+	}
 
 	// set the tip
 	wstring wsText=app.FormatHTMLString(m_iPad,app.GetString(app.GetNextTip()));
@@ -69,9 +94,11 @@ HRESULT CScene_FullscreenProgress::OnDestroy()
 {
 	if( thread != NULL && thread != INVALID_HANDLE_VALUE )
 		delete thread;
+	thread = NULL;
 
 	if( m_CompletionData != NULL )
 		delete m_CompletionData;
+	m_CompletionData = NULL;
 
 	return S_OK;
 }
@@ -170,6 +197,12 @@ HRESULT CScene_FullscreenProgress::OnGetSourceDataText(XUIMessageGetSourceText *
 	// This gets called every frame, so use it to update our two text boxes
 	
 	Minecraft *pMinecraft=Minecraft::GetInstance();
+	if(pMinecraft == NULL || pMinecraft->progressRenderer == NULL)
+	{
+		m_title.SetText( L"" );
+		m_status.SetText( L"" );
+		return S_OK;
+	}
 
 	int title = pMinecraft->progressRenderer->getCurrentTitle();
 	if(title >= 0)
@@ -190,16 +223,25 @@ HRESULT CScene_FullscreenProgress::OnTransitionStart( XUIMessageTransition *pTra
 {
 	if(!threadStarted)
 	{
-		thread->Run();
-		threadStarted = true;
-		XuiSetTimer(m_hObj,TIMER_FULLSCREEN_PROGRESS,TIMER_FULLSCREEN_PROGRESS_TIME);
-		XuiSetTimer(m_hObj,TIMER_FULLSCREEN_TIPS,TIMER_FULLSCREEN_TIPS_TIME);
+		if(thread != NULL)
+		{
+			thread->Run();
+			threadStarted = true;
+			XuiSetTimer(m_hObj,TIMER_FULLSCREEN_PROGRESS,TIMER_FULLSCREEN_PROGRESS_TIME);
+			XuiSetTimer(m_hObj,TIMER_FULLSCREEN_TIPS,TIMER_FULLSCREEN_TIPS_TIME);
+		}
 	}
 	return S_OK;
 }
 
 HRESULT CScene_FullscreenProgress::OnTimer( XUIMessageTimer *pTimer, BOOL& bHandled )
 {
+	if(thread == NULL)
+	{
+		bHandled = TRUE;
+		return S_OK;
+	}
+
 	int code = thread->GetExitCode();
     DWORD exitcode = *((DWORD *)&code);
 
@@ -207,6 +249,14 @@ HRESULT CScene_FullscreenProgress::OnTimer( XUIMessageTimer *pTimer, BOOL& bHand
 
 	if( exitcode != STILL_ACTIVE )
 	{
+#ifdef __ORBIS__
+		Minecraft *pMinecraft = Minecraft::GetInstance();
+		if( exitcode == S_OK && pMinecraft != NULL && pMinecraft->gameRenderer != NULL && pMinecraft->level != NULL )
+		{
+			pMinecraft->gameRenderer->EnableUpdateThread();
+		}
+#endif
+
 		// 4J-PB - need to kill the timers whatever happens
 		XuiKillTimer(m_hObj,TIMER_FULLSCREEN_PROGRESS);
 		XuiKillTimer(m_hObj,TIMER_FULLSCREEN_TIPS);

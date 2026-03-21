@@ -211,6 +211,8 @@ public:
 #ifdef __ORBIS__
 	static int		OptionsDataCallback(LPVOID pParam,int iPad,unsigned short usVersion,C4JStorage::eOptionsCallback eStatus,int iBlocksRequired);
 	int				GetOptionsBlocksRequired(int iPad);
+	bool			LoadGlobalSettingsFromDisk(int iPad);
+	void			SaveGlobalSettingsToDisk(int iPad);
 #else
 	static int		OptionsDataCallback(LPVOID pParam,int iPad,unsigned short usVersion,C4JStorage::eOptionsCallback eStatus);
 #endif

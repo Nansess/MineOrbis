@@ -248,6 +248,76 @@ void LevelChunk::setUnsaved(bool unsaved)
 	m_unsaved = unsaved;
 }
 
+#ifdef __ORBIS__
+void LevelChunk::ensureOrbisSerializableStorage(const char *caller, bool includeLighting)
+{
+#ifdef SHARING_ENABLED
+	if( sharingTilesAndData )
+	{
+		app.DebugPrintf("%s forcing unshare for chunk=%d,%d includeLighting=%d\n",
+			caller ? caller : "LevelChunk::ensureOrbisSerializableStorage",
+			x, z, includeLighting ? 1 : 0);
+		stopSharingTilesAndData();
+	}
+#endif
+
+	bool repairedStorage = false;
+	if( lowerBlocks == NULL )
+	{
+		lowerBlocks = new CompressedTileStorage(true);
+		repairedStorage = true;
+	}
+	if( lowerData == NULL )
+	{
+		lowerData = new SparseDataStorage(false);
+		repairedStorage = true;
+	}
+	if( lowerSkyLight == NULL )
+	{
+		lowerSkyLight = new SparseLightStorage(true, false);
+		repairedStorage = true;
+	}
+	if( lowerBlockLight == NULL )
+	{
+		lowerBlockLight = new SparseLightStorage(false, false);
+		repairedStorage = true;
+	}
+
+	if( Level::maxBuildHeight > Level::COMPRESSED_CHUNK_SECTION_HEIGHT )
+	{
+		if( upperBlocks == NULL )
+		{
+			upperBlocks = new CompressedTileStorage(true);
+			repairedStorage = true;
+		}
+		if( upperData == NULL )
+		{
+			upperData = new SparseDataStorage(true);
+			repairedStorage = true;
+		}
+		if( upperSkyLight == NULL )
+		{
+			upperSkyLight = new SparseLightStorage(true, true);
+			repairedStorage = true;
+		}
+		if( upperBlockLight == NULL )
+		{
+			upperBlockLight = new SparseLightStorage(false, true);
+			repairedStorage = true;
+		}
+	}
+
+	if( repairedStorage )
+	{
+		app.DebugPrintf("%s repaired storage chunk=%d,%d includeLighting=%d lower=%p/%p/%p/%p upper=%p/%p/%p/%p\n",
+			caller ? caller : "LevelChunk::ensureOrbisSerializableStorage",
+			x, z, includeLighting ? 1 : 0,
+			lowerBlocks, lowerData, lowerSkyLight, lowerBlockLight,
+			upperBlocks, upperData, upperSkyLight, upperBlockLight);
+	}
+}
+#endif
+
 void LevelChunk::stopSharingTilesAndData()
 {
 #ifdef SHARING_ENABLED
@@ -1688,12 +1758,16 @@ bool LevelChunk::shouldSave(bool force)
 
 int LevelChunk::getBlocksAndData(byteArray *data, int x0, int y0, int z0, int x1, int y1, int z1, int p, bool includeLighting/* = true*/)
 {
-    int xs = x1 - x0;
-    int ys = y1 - y0;
-    int zs = z1 - z0;
+	int xs = x1 - x0;
+	int ys = y1 - y0;
+	int zs = z1 - z0;
 
 	// 4J Stu - Added this because some "min" functions don't let us use our constants :(
 	int compressedHeight = Level::COMPRESSED_CHUNK_SECTION_HEIGHT;
+
+#ifdef __ORBIS__
+	ensureOrbisSerializableStorage("LevelChunk::getBlocksAndData", includeLighting);
+#endif
 
 	// 4J - replaced block storage as now using CompressedTileStorage
 	if(y0 < Level::COMPRESSED_CHUNK_SECTION_HEIGHT) p += lowerBlocks->getDataRegion( *data, x0, y0, z0, x1, min(compressedHeight, y1), z1, p );
@@ -1761,6 +1835,10 @@ void LevelChunk::tileUpdatedCallback(int x, int y, int z, void *param, int ypara
 
 int LevelChunk::setBlocksAndData(byteArray data, int x0, int y0, int z0, int x1, int y1, int z1, int p, bool includeLighting/* = true*/)
 {
+#ifdef __ORBIS__
+	ensureOrbisSerializableStorage("LevelChunk::setBlocksAndData", includeLighting);
+#endif
+
 	// If includeLighting is set, then this is a full chunk's worth of data that we are receiving on the client. We'll have made this chunk initially as compressed,
 	// so throw that data away and make some fully uncompressed storage now to improve the speed up writing to it. Only doing this for lower chunks as quite likely
 	// that the upper chunk doesn't have anything in anyway.
@@ -2074,6 +2152,9 @@ void LevelChunk::updateBiomeFlags(int x, int z)
 // Get a byte array of length 16384 ( 128 x 16 x 16 x 0.5 ), containing data. Ordering same as java version if originalOrder set;
 void LevelChunk::getDataData(byteArray data)
 {
+#ifdef __ORBIS__
+	ensureOrbisSerializableStorage("LevelChunk::getDataData", false);
+#endif
 	lowerData->getData(data,0);
 	if(data.length > Level::COMPRESSED_CHUNK_SECTION_TILES/2) upperData->getData(data,Level::COMPRESSED_CHUNK_SECTION_TILES/2);
 }
@@ -2090,6 +2171,9 @@ void LevelChunk::setDataData(byteArray data)
 // Get a byte array of length 16384 ( 128 x 16 x 16 x 0.5 ), containing sky light data. Ordering same as java version if originalOrder set;
 void LevelChunk::getSkyLightData(byteArray data)
 {
+#ifdef __ORBIS__
+	ensureOrbisSerializableStorage("LevelChunk::getSkyLightData", true);
+#endif
 	lowerSkyLight->getData(data,0);
 	if(data.length > Level::COMPRESSED_CHUNK_SECTION_TILES/2) upperSkyLight->getData(data,Level::COMPRESSED_CHUNK_SECTION_TILES/2);
 }
@@ -2097,6 +2181,9 @@ void LevelChunk::getSkyLightData(byteArray data)
 // Get a byte array of length 16384 ( 128 x 16 x 16 x 0.5 ), containing block light data. Ordering same as java version if originalOrder set;
 void LevelChunk::getBlockLightData(byteArray data)
 {
+#ifdef __ORBIS__
+	ensureOrbisSerializableStorage("LevelChunk::getBlockLightData", true);
+#endif
 	lowerBlockLight->getData(data,0);
 	if(data.length > Level::COMPRESSED_CHUNK_SECTION_TILES/2) upperBlockLight->getData(data,Level::COMPRESSED_CHUNK_SECTION_TILES/2);
 }
@@ -2188,24 +2275,36 @@ int LevelChunk::isLowerDataStorageCompressed()
 
 void LevelChunk::writeCompressedBlockData(DataOutputStream *dos)
 {
+#ifdef __ORBIS__
+	ensureOrbisSerializableStorage("LevelChunk::writeCompressedBlockData", false);
+#endif
 	lowerBlocks->write(dos);
 	upperBlocks->write(dos);
 }
 
 void LevelChunk::writeCompressedDataData(DataOutputStream *dos)
 {
+#ifdef __ORBIS__
+	ensureOrbisSerializableStorage("LevelChunk::writeCompressedDataData", false);
+#endif
 	lowerData->write(dos);
 	upperData->write(dos);
 }
 
 void LevelChunk::writeCompressedSkyLightData(DataOutputStream *dos)
 {
+#ifdef __ORBIS__
+	ensureOrbisSerializableStorage("LevelChunk::writeCompressedSkyLightData", true);
+#endif
 	lowerSkyLight->write(dos);
 	upperSkyLight->write(dos);
 }
 
 void LevelChunk::writeCompressedBlockLightData(DataOutputStream *dos)
 {
+#ifdef __ORBIS__
+	ensureOrbisSerializableStorage("LevelChunk::writeCompressedBlockLightData", true);
+#endif
 	lowerBlockLight->write(dos);
 	upperBlockLight->write(dos);
 }
@@ -2301,6 +2400,9 @@ void LevelChunk::setBlockData(byteArray data)
 // Sets data in passed in array of size 32768, from the block data in this chunk
 void LevelChunk::getBlockData(byteArray data)
 {
+#ifdef __ORBIS__
+	ensureOrbisSerializableStorage("LevelChunk::getBlockData", false);
+#endif
 	lowerBlocks->getData(data,0);
 	if(data.length > Level::COMPRESSED_CHUNK_SECTION_TILES) upperBlocks->getData(data,Level::COMPRESSED_CHUNK_SECTION_TILES);
 }
@@ -2322,6 +2424,9 @@ int LevelChunk::getHighestNonEmptyY()
 
 byteArray LevelChunk::getReorderedBlocksAndData(int x0, int y0, int z0, int xs, int &ys, int zs)
 {
+#ifdef __ORBIS__
+	ensureOrbisSerializableStorage("LevelChunk::getReorderedBlocksAndData", true);
+#endif
 	int highestNonEmpty = getHighestNonEmptyY();
 
 	ys = min(highestNonEmpty - y0, ys);

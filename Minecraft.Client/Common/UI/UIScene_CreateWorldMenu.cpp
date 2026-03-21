@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "UI.h"
 #include "UIScene_CreateWorldMenu.h"
+#include "..\ProfileModeShim.h"
 #include "..\..\MinecraftServer.h"
 #include "..\..\Minecraft.h"
 #include "..\..\Options.h"
@@ -79,7 +80,7 @@ UIScene_CreateWorldMenu::UIScene_CreateWorldMenu(int iPad, void *initData, UILay
 	m_pDLCPack = NULL;
 	m_bRebuildTouchBoxes = false;
 
-	m_bMultiplayerAllowed = ProfileManager.IsSignedInLive( m_iPad ) && ProfileManager.AllowedToPlayMultiplayer(m_iPad);
+	m_bMultiplayerAllowed = GameHasOnlineServices(m_iPad);
 	// 4J-PB - read the settings for the online flag. We'll only save this setting if the user changed it.
 	bool bGameSetting_Online=(app.GetGameSettings(m_iPad,eGameSetting_Online)!=0);
 	m_MoreOptionsParams.bOnlineSettingChangedBySystem=false;
@@ -129,7 +130,7 @@ UIScene_CreateWorldMenu::UIScene_CreateWorldMenu(int iPad, void *initData, UILay
 		m_checkboxOnline.SetEnable(true);
 
 		// 4J-PB - to stop an offline game being able to select the online flag
-		if(ProfileManager.IsSignedInLive(m_iPad) == false)
+		if(!GameHasOnlineServices(m_iPad))
 		{
 			m_checkboxOnline.SetEnable(false);
 		}
@@ -658,7 +659,7 @@ void UIScene_CreateWorldMenu::handleTimerComplete(int id)
 	{
 	case GAME_CREATE_ONLINE_TIMER_ID:
 		{
-			bool bMultiplayerAllowed = ProfileManager.IsSignedInLive( m_iPad ) && ProfileManager.AllowedToPlayMultiplayer(m_iPad);
+			bool bMultiplayerAllowed = GameHasOnlineServices(m_iPad);
 
 			if(bMultiplayerAllowed != m_bMultiplayerAllowed)
 			{
@@ -808,13 +809,13 @@ void UIScene_CreateWorldMenu::checkStateAndStartGame()
 	{
 		if (ProfileManager.IsSignedIn(i) && (i == primaryPad || isLocalMultiplayerAvailable))
 		{
-			if (isSignedInLive && !ProfileManager.IsSignedInLive(i))
+			if (isSignedInLive && !GameIsSignedInLive(i))
 			{
 				// Record the first non signed in live pad
 				iPadNotSignedInLive = i;
 			}
 
-			isSignedInLive = isSignedInLive && ProfileManager.IsSignedInLive(i);
+			isSignedInLive = isSignedInLive && GameIsSignedInLive(i);
 		}
 	}
 
@@ -825,7 +826,7 @@ void UIScene_CreateWorldMenu::checkStateAndStartGame()
 		assert(iPadNotSignedInLive != -1);
 
 		// Check if PSN is unavailable because of age restriction
-		int npAvailability = ProfileManager.getNPAvailability(iPadNotSignedInLive);
+		int npAvailability = GameGetNPAvailability(iPadNotSignedInLive);
 		if (npAvailability == SCE_NP_ERROR_AGE_RESTRICTION)
 		{
 			m_bIgnoreInput = false;
@@ -881,7 +882,7 @@ void UIScene_CreateWorldMenu::checkStateAndStartGame()
 		{
 			if(ProfileManager.IsSignedIn(i) && (i == primaryPad || isLocalMultiplayerAvailable))
 			{
-				if(ProfileManager.HasPlayStationPlus(i)==false)
+				if(GameHasNetworkSubscription(i)==false)
 				{
 					bPlayStationPlus=false;
 					iPadWithNoPlaystationPlus=i;
@@ -1068,7 +1069,7 @@ void UIScene_CreateWorldMenu::CreateGame(UIScene_CreateWorldMenu* pClass, DWORD 
 	XuiKillTimer(pClass->m_hObj,CHECKFORAVAILABLETEXTUREPACKS_TIMER_ID);
 #endif
 
-	bool isClientSide = ProfileManager.IsSignedInLive(ProfileManager.GetPrimaryPad()) && pClass->m_MoreOptionsParams.bOnlineGame;
+	bool isClientSide = GameIsSignedInLive(ProfileManager.GetPrimaryPad()) && pClass->m_MoreOptionsParams.bOnlineGame;
 #ifdef __PSVITA__
 	if(CGameNetworkManager::usingAdhocMode())
 	{
@@ -1239,12 +1240,12 @@ int UIScene_CreateWorldMenu::StartGame_SignInReturned(void *pParam,bool bContinu
 		// It's possible that the player has not signed in - they can back out
 		if(ProfileManager.IsSignedIn(pClass->m_iPad))
 		{
-			bool isOnlineGame = ProfileManager.IsSignedInLive(ProfileManager.GetPrimaryPad()) && pClass->m_MoreOptionsParams.bOnlineGame;
+			bool isOnlineGame = GameIsSignedInLive(ProfileManager.GetPrimaryPad()) && pClass->m_MoreOptionsParams.bOnlineGame;
 			// bool isOnlineGame = pClass->m_MoreOptionsParams.bOnlineGame;
 			int primaryPad = ProfileManager.GetPrimaryPad();
 			bool noPrivileges = false;
 			DWORD dwLocalUsersMask = 0;
-			bool isSignedInLive = ProfileManager.IsSignedInLive(primaryPad);
+			bool isSignedInLive = GameIsSignedInLive(primaryPad);
 			int iPadNotSignedInLive = -1;
 			bool isLocalMultiplayerAvailable = app.IsLocalMultiplayerAvailable();
 
@@ -1252,15 +1253,15 @@ int UIScene_CreateWorldMenu::StartGame_SignInReturned(void *pParam,bool bContinu
 			{
 				if (ProfileManager.IsSignedIn(i) && ((i == primaryPad) || isLocalMultiplayerAvailable))
 				{
-					if (isSignedInLive && !ProfileManager.IsSignedInLive(i))
+					if (isSignedInLive && !GameIsSignedInLive(i))
 					{
 						// Record the first non signed in live pad
 						iPadNotSignedInLive = i;
 					}
 
-					if( !ProfileManager.AllowedToPlayMultiplayer(i) ) noPrivileges = true;
+					if( !GameAllowedToPlayMultiplayer(i) ) noPrivileges = true;
 					dwLocalUsersMask |= CGameNetworkManager::GetLocalPlayerMask(i);
-					isSignedInLive = isSignedInLive && ProfileManager.IsSignedInLive(i);
+					isSignedInLive = isSignedInLive && GameIsSignedInLive(i);
 				}
 			}
 
@@ -1271,7 +1272,7 @@ int UIScene_CreateWorldMenu::StartGame_SignInReturned(void *pParam,bool bContinu
 				assert(iPadNotSignedInLive != -1);
 
 				// Check if PSN is unavailable because of age restriction
-				int npAvailability = ProfileManager.getNPAvailability(iPadNotSignedInLive);
+				int npAvailability = GameGetNPAvailability(iPadNotSignedInLive);
 				if (npAvailability == SCE_NP_ERROR_AGE_RESTRICTION)
 				{
 					pClass->m_bIgnoreInput = false;
@@ -1344,7 +1345,7 @@ int UIScene_CreateWorldMenu::ConfirmCreateReturned(void *pParam,int iPad,C4JStor
 
 	if(result==C4JStorage::EMessage_ResultAccept) 
 	{
-		bool isClientSide = ProfileManager.IsSignedInLive(ProfileManager.GetPrimaryPad()) && pClass->m_MoreOptionsParams.bOnlineGame;
+		bool isClientSide = GameIsSignedInLive(ProfileManager.GetPrimaryPad()) && pClass->m_MoreOptionsParams.bOnlineGame;
 
 		// 4J Stu - If we only have one controller connected, then don't show the sign-in UI again
 		DWORD connectedControllers = 0;
@@ -1365,7 +1366,7 @@ int UIScene_CreateWorldMenu::ConfirmCreateReturned(void *pParam,int iPad,C4JStor
 		else
 		{
 			// Check if user-created content is allowed, as we cannot play multiplayer if it's not
-			bool isClientSide = ProfileManager.IsSignedInLive(ProfileManager.GetPrimaryPad()) && pClass->m_MoreOptionsParams.bOnlineGame;
+			bool isClientSide = GameIsSignedInLive(ProfileManager.GetPrimaryPad()) && pClass->m_MoreOptionsParams.bOnlineGame;
 			bool noUGC = false;
 			BOOL pccAllowed = TRUE;
 			BOOL pccFriendsAllowed = TRUE;
@@ -1383,7 +1384,7 @@ int UIScene_CreateWorldMenu::ConfirmCreateReturned(void *pParam,int iPad,C4JStor
 			else
 			{	
 #if defined( __ORBIS__) || defined(__PSVITA__)
-				bool isOnlineGame = ProfileManager.IsSignedInLive(ProfileManager.GetPrimaryPad()) && pClass->m_MoreOptionsParams.bOnlineGame;
+				bool isOnlineGame = GameIsSignedInLive(ProfileManager.GetPrimaryPad()) && pClass->m_MoreOptionsParams.bOnlineGame;
 				if(isOnlineGame)
 				{
 					bool chatRestricted = false;
@@ -1413,7 +1414,7 @@ int UIScene_CreateWorldMenu::MustSignInReturnedPSN(void *pParam,int iPad,C4JStor
 
     if(result==C4JStorage::EMessage_ResultAccept) 
     {
-        SQRNetworkManager_Orbis::AttemptPSNSignIn(&UIScene_CreateWorldMenu::StartGame_SignInReturned, pClass, false, iPad);
+        UIScene_CreateWorldMenu::StartGame_SignInReturned(pClass, true, iPad);
     }
 
     return 0;

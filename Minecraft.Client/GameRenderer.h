@@ -155,6 +155,7 @@ public:
 	};
 	static bool			nearThingsToDo;
 	static bool			updateRunning;
+	static bool			m_deferredEnableRequested;
 #endif
 	static vector<byte *> m_deleteStackByte;
 	static vector<SparseLightStorage *> m_deleteStackSparseLightStorage;

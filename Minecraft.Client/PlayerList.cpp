@@ -86,7 +86,7 @@ void PlayerList::placeNewPlayer(Connection *connection, shared_ptr<ServerPlayer>
 			player->setPlayerGamePrivilege(Player::ePlayerGamePrivilege_HOST,1);
 		}
 
-#if defined(__PS3__) || defined(__ORBIS__)
+#if defined(__PS3__)
 		// PS3 networking library doesn't automatically assign PlayerUIDs to the network players for anything remote, so need to tell it what to set from the data in this packet now
 		if( !g_NetworkManager.IsLocalGame() )
 		{

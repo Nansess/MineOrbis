@@ -41,8 +41,6 @@
 #include "..\..\Minecraft.World\OldChunkStorage.h"
 #include "Leaderboards\OrbisLeaderboardManager.h"
 
-#include "Network/Orbis_NPToolkit.h"
-#include "Orbis\Network\SonyVoiceChat_Orbis.h"
 
 #define THEME_NAME		"584111F70AAAAAAA"
 #define THEME_FILESIZE	2797568
@@ -704,7 +702,7 @@ void RegisterAwardsWithProfileManager()
 	// Rich Presence init - number of presences, number of contexts
 	//printf("Rich presence strings are hard coded on PS3 for now, must change this!\n");
 	ProfileManager.RichPresenceInit(4,1);
-	ProfileManager.SetRichPresenceSettingFn(SQRNetworkManager_Orbis::SetRichPresence);
+	ProfileManager.SetRichPresenceSettingFn(NULL);
 	char *pchRichPresenceString;
 
 	pchRichPresenceString=(char *)AddRichPresenceString(IDS_RICHPRESENCE_GAMESTATE);
@@ -951,7 +949,6 @@ int main(int argc, const char *argv[] )
 
 #endif
 	app.InitTime();
-	NPToolkit.init();
 
 	// Set the number of possible joypad layouts that the user can switch between, and the number of actions
 	InputManager.Initialise(1,5,MINECRAFT_ACTION_MAX, ACTION_MAX_MENU);
@@ -1058,6 +1055,9 @@ int main(int argc, const char *argv[] )
 
 	// debug switch to trial version
  	ProfileManager.SetDebugFullOverride(true);
+	ProfileManager.SetFullVersion(true);
+	StorageManager.SetSaveDisabled(false);
+	app.DebugPrintf("Orbis offline build forcing full-version mode\n");
 #if 0
 
 	//ProfileManager.AddDLC(2);
@@ -1201,7 +1201,6 @@ int main(int argc, const char *argv[] )
 
 	while (TRUE)
 	{
-		SonyVoiceChat_Orbis::tick();
 		RenderManager.StartFrame();
 #if 0
 		if(pMinecraft->soundEngine->isStreamingWavebankReady() &&
@@ -1359,6 +1358,7 @@ int main(int argc, const char *argv[] )
 				{
 					// It has - game needs to update its values with the data from the profile
 					pData=StorageManager.GetGameDefinedProfileData(i);
+					app.LoadGlobalSettingsFromDisk(i);
 					// reset the changed flag
 					app.ClearGameSettingsChangedFlag(i);
 					app.DebugPrintf("***  - APPLYING GAME SETTINGS CHANGE for pad %d\n",i);

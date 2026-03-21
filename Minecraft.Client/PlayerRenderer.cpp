@@ -50,6 +50,11 @@ int PlayerRenderer::prepareArmor(shared_ptr<Mob> _player, int layer, float a)
 {
 	// 4J - dynamic cast required because we aren't using templates/generics in our version
 	shared_ptr<Player> player = dynamic_pointer_cast<Player>(_player);
+	if (player == NULL)
+	{
+		app.DebugPrintf("PlayerRenderer::prepareArmor expected Player mob=%p\n", _player.get());
+		return -1;
+	}
 
 	// 4J-PB - need to disable rendering armour for some special skins (Daleks)
 	unsigned int uiAnimOverrideBitmask=player->getAnimOverrideBitmask();
@@ -112,6 +117,11 @@ void PlayerRenderer::prepareSecondPassArmor(shared_ptr<Mob> _player, int layer, 
 {
 	// 4J - dynamic cast required because we aren't using templates/generics in our version
 	shared_ptr<Player> player = dynamic_pointer_cast<Player>(_player);
+	if (player == NULL)
+	{
+		app.DebugPrintf("PlayerRenderer::prepareSecondPassArmor expected Player mob=%p\n", _player.get());
+		return;
+	}
 	shared_ptr<ItemInstance> itemInstance = player->inventory->getArmor(3 - layer);
 	if (itemInstance != NULL)
 	{
@@ -131,6 +141,11 @@ void PlayerRenderer::render(shared_ptr<Entity> _mob, double x, double y, double 
 {
 	// 4J - dynamic cast required because we aren't using templates/generics in our version
 	shared_ptr<Player> mob = dynamic_pointer_cast<Player>(_mob);
+	if (mob == NULL)
+	{
+		app.DebugPrintf("PlayerRenderer::render expected Player entity=%p\n", _mob.get());
+		return;
+	}
 
 	if(mob->hasInvisiblePrivilege()) return;
 
@@ -232,6 +247,11 @@ void PlayerRenderer::renderName(shared_ptr<Mob> _mob, double x, double y, double
 {
 	// 4J - dynamic cast required because we aren't using templates/generics in our version
 	shared_ptr<Player> mob = dynamic_pointer_cast<Player>(_mob);
+	if (mob == NULL)
+	{
+		app.DebugPrintf("PlayerRenderer::renderName expected Player mob=%p\n", _mob.get());
+		return;
+	}
 
     if (Minecraft::renderNames() && mob != entityRenderDispatcher->cameraEntity
 		&& !mob->isInvisibleTo(Minecraft::GetInstance()->player) ) // 4J-JEV: Todo, move to LivingEntityRenderer.
@@ -322,6 +342,11 @@ void PlayerRenderer::additionalRendering(shared_ptr<Mob> _mob, float a)
 
 	// 4J - dynamic cast required because we aren't using templates/generics in our version
 	shared_ptr<Player> mob = dynamic_pointer_cast<Player>(_mob);
+	if (mob == NULL)
+	{
+		app.DebugPrintf("PlayerRenderer::additionalRendering expected Player mob=%p\n", _mob.get());
+		return;
+	}
 
     shared_ptr<ItemInstance> headGear = mob->inventory->getArmor(3);
     if (headGear != NULL)
@@ -544,6 +569,11 @@ void PlayerRenderer::setupPosition(shared_ptr<Mob> _mob, double x, double y, dou
 {
 	// 4J - dynamic cast required because we aren't using templates/generics in our version
 	shared_ptr<Player> mob = dynamic_pointer_cast<Player>(_mob);
+	if (mob == NULL)
+	{
+		app.DebugPrintf("PlayerRenderer::setupPosition expected Player mob=%p\n", _mob.get());
+		return;
+	}
 
     if (mob->isAlive() && mob->isSleeping())
 	{
@@ -560,6 +590,11 @@ void PlayerRenderer::setupRotations(shared_ptr<Mob> _mob, float bob, float bodyR
 {
 	// 4J - dynamic cast required because we aren't using templates/generics in our version
 	shared_ptr<Player> mob = dynamic_pointer_cast<Player>(_mob);
+	if (mob == NULL)
+	{
+		app.DebugPrintf("PlayerRenderer::setupRotations expected Player mob=%p\n", _mob.get());
+		return;
+	}
 
     if (mob->isAlive() && mob->isSleeping())
 	{

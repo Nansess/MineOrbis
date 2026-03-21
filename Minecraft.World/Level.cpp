@@ -752,7 +752,9 @@ int Level::getTile(int x, int y, int z)
 	}
 	if (y < minBuildHeight) return 0;
 	if (y >= maxBuildHeight) return 0;
-	return getChunk(x >> 4, z >> 4)->getTile(x & 15, y, z & 15);
+	LevelChunk *chunk = getChunk(x >> 4, z >> 4);
+	if (chunk == NULL) return 0;
+	return chunk->getTile(x & 15, y, z & 15);
 }
 
 int Level::getTileLightBlock(int x, int y, int z)
@@ -763,7 +765,9 @@ int Level::getTileLightBlock(int x, int y, int z)
 	}
 	if (y < minBuildHeight) return 0;
 	if (y >= maxBuildHeight) return 0;
-	return getChunk(x >> 4, z >> 4)->getTileLightBlock(x & 15, y, z & 15);
+	LevelChunk *chunk = getChunk(x >> 4, z >> 4);
+	if (chunk == NULL) return 0;
+	return chunk->getTileLightBlock(x & 15, y, z & 15);
 }
 
 bool Level::isEmptyTile(int x, int y, int z)
@@ -4243,7 +4247,21 @@ byteArray Level::getBlocksAndData(int x, int y, int z, int xs, int ys, int zs, b
 			int z1 = z + zs - zc * 16;
 			if (z0 < 0) z0 = 0;
 			if (z1 > 16) z1 = 16;
-			p = getChunk(xc, zc)->getBlocksAndData(&result, x0, y0, z0, x1, y1, z1, p, includeLighting);
+			LevelChunk *lc = getChunk(xc, zc);
+#ifdef __ORBIS__
+			if (lc == NULL)
+			{
+				int blockCount = (x1 - x0) * (y1 - y0) * (z1 - z0);
+				int len = blockCount + (blockCount / 2);
+				if (includeLighting) len += (blockCount / 2) * 2;
+				app.DebugPrintf("Level::getBlocksAndData missing chunk %d,%d region=(%d,%d,%d)->(%d,%d,%d) includeLighting=%d\n",
+					xc, zc, x0, y0, z0, x1, y1, z1, includeLighting ? 1 : 0);
+				memset(result.data + p, 0, len);
+				p += len;
+				continue;
+			}
+#endif
+			p = lc->getBlocksAndData(&result, x0, y0, z0, x1, y1, z1, p, includeLighting);
 		}
 	}
 
@@ -4282,6 +4300,18 @@ void Level::setBlocksAndData(int x, int y, int z, int xs, int ys, int zs, byteAr
 			// This is quite expensive so only actually do it if we are hosting, online, and the update will actually
 			// change something
 			bool forceUnshare = false;
+#ifdef __ORBIS__
+			if( lc == NULL )
+			{
+				int blockCount = (x1 - x0) * (y1 - y0) * (z1 - z0);
+				int len = blockCount + (blockCount / 2);
+				if (includeLighting) len += (blockCount / 2) * 2;
+				app.DebugPrintf("Level::setBlocksAndData missing chunk %d,%d region=(%d,%d,%d)->(%d,%d,%d) includeLighting=%d\n",
+					xc, zc, x0, y0, z0, x1, y1, z1, includeLighting ? 1 : 0);
+				p += len;
+				continue;
+			}
+#endif
 			if( g_NetworkManager.IsHost() && isClientSide )
 			{
 				forceUnshare = lc->testSetBlocksAndData(data, x0, y0, z0, x1, y1, z1, p);
@@ -4300,8 +4330,8 @@ void Level::setBlocksAndData(int x, int y, int z, int xs, int ys, int zs, byteAr
 			if( g_NetworkManager.IsHost() && isClientSide )
 			{
 				lc->startSharingTilesAndData();
-			}
-			PIXEndNamedEvent();
+				}
+				PIXEndNamedEvent();
 		}
 	}
 }

@@ -6,8 +6,10 @@ using namespace std;
 #include "NetworkPlayerInterface.h"
 #ifdef _XBOX
 #include "..\..\Xbox\Network\PlatformNetworkManagerXbox.h"
-#elif defined __PS3__ || defined __ORBIS__ || defined __PSVITA__
+#elif defined __PS3__ || defined __PSVITA__
 #include "..\..\Common\Network\Sony\PlatformNetworkManagerSony.h"
+#elif defined __ORBIS__
+#include "PlatformNetworkManagerStub.h"
 #elif defined _DURANGO
 #include "..\..\Durango\Network\PlatformNetworkManagerDurango.h"
 #else
@@ -15,12 +17,9 @@ using namespace std;
 #endif
 #include "SessionInfo.h"
 
-#ifdef __ORBIS__
-#include "..\..\Orbis\Network\PsPlusUpsellWrapper_Orbis.h"
-#endif
-
 class ClientConnection;
 class Minecraft;
+class PsPlusUpsellWrapper;
 
 
 // This class implements the game-side interface to the networking system. As such, it is platform independent and may contain bits of game-side code where appropriate.
@@ -31,8 +30,10 @@ class CGameNetworkManager
 {
 #ifdef _XBOX
 	friend class CPlatformNetworkManagerXbox;
-#elif defined __PS3__ || defined __ORBIS__ || defined __PSVITA__
+#elif defined __PS3__ || defined __PSVITA__
 	friend class CPlatformNetworkManagerSony;
+#elif defined __ORBIS__
+	friend class CPlatformNetworkManagerStub;
 #elif defined _DURANGO
 	friend class CPlatformNetworkManagerDurango;
 #else

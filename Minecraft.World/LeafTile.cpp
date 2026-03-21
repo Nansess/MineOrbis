@@ -7,6 +7,13 @@
 #include "net.minecraft.stats.h"
 #include "net.minecraft.world.h"
 
+static int getLeafMappedColor(eMinecraftColour colourId, int fallbackColour)
+{
+	Minecraft *minecraft = Minecraft::GetInstance();
+	ColourTable *colourTable = minecraft != NULL ? minecraft->getColourTable() : NULL;
+	return colourTable != NULL ? colourTable->getColor(colourId) : fallbackColour;
+}
+
 const unsigned int LeafTile::LEAF_NAMES[LEAF_NAMES_LENGTH] = {	IDS_TILE_LEAVES_OAK,
 													IDS_TILE_LEAVES_SPRUCE,
 													IDS_TILE_LEAVES_BIRCH,
@@ -35,7 +42,7 @@ int LeafTile::getColor() const
 
     //return FoliageColor::get(temp, rain);
 
-	return Minecraft::GetInstance()->getColourTable()->getColor( eMinecraftColour_Foliage_Common );
+	return getLeafMappedColor(eMinecraftColour_Foliage_Common, 0x48b518);
 }
 
 int LeafTile::getColor(int data)

@@ -432,12 +432,24 @@ void MultiPlayerLevel::removeEntity(shared_ptr<Entity> e)
 
 void MultiPlayerLevel::entityAdded(shared_ptr<Entity> e)
 {
+#ifdef __ORBIS__
+	if(e != NULL)
+	{
+		app.DebugPrintf("MultiPlayerLevel::entityAdded begin type=%d entityId=%d ptr=%p\n", e->GetType(), e->entityId, e.get());
+	}
+#endif
     Level::entityAdded(e);
 	AUTO_VAR(it, reEntries.find(e));
     if (it!=reEntries.end())
 	{
         reEntries.erase(it);
     }
+#ifdef __ORBIS__
+	if(e != NULL)
+	{
+		app.DebugPrintf("MultiPlayerLevel::entityAdded end type=%d entityId=%d ptr=%p\n", e->GetType(), e->entityId, e.get());
+	}
+#endif
 }
 
 void MultiPlayerLevel::entityRemoved(shared_ptr<Entity> e)
@@ -452,19 +464,80 @@ void MultiPlayerLevel::entityRemoved(shared_ptr<Entity> e)
 
 void MultiPlayerLevel::putEntity(int id, shared_ptr<Entity> e)
 {
+#ifdef __ORBIS__
+	if(e != NULL)
+	{
+		app.DebugPrintf("MultiPlayerLevel::putEntity begin id=%d type=%d ptr=%p pos=%f,%f,%f\n", id, e->GetType(), e.get(), e->x, e->y, e->z);
+	}
+#endif
+	for(int i = 0; i < XUSER_MAX_COUNT; ++i)
+	{
+		shared_ptr<MultiplayerLocalPlayer> localPlayer = minecraft->localplayers[i];
+		if(localPlayer != NULL && localPlayer->entityId == id && localPlayer.get() != e.get())
+		{
+#ifdef __ORBIS__
+			app.DebugPrintf("MultiPlayerLevel::putEntity refusing to overwrite local player id=%d localPtr=%p incomingPtr=%p incomingType=%d pad=%d\n",
+				id,
+				localPlayer.get(),
+				e.get(),
+				e != NULL ? e->GetType() : -1,
+				i);
+#endif
+			AUTO_VAR(localIt, entitiesById.find(id));
+			if(localIt != entitiesById.end() && localIt->second.get() != localPlayer.get())
+			{
+#ifdef __ORBIS__
+				app.DebugPrintf("MultiPlayerLevel::putEntity removing stale mapping for local player id=%d stalePtr=%p staleType=%d\n",
+					id,
+					localIt->second.get(),
+					localIt->second != NULL ? localIt->second->GetType() : -1);
+#endif
+				removeEntity(id);
+			}
+			return;
+		}
+	}
+
     shared_ptr<Entity> old = getEntity(id);
     if (old != NULL)
 	{
+#ifdef __ORBIS__
+		app.DebugPrintf("MultiPlayerLevel::putEntity replacing old id=%d oldType=%d oldPtr=%p\n", id, old->GetType(), old.get());
+#endif
         removeEntity(old);
     }
 
     forced.insert(e);
     e->entityId = id;
+#ifdef __ORBIS__
+	if(e != NULL)
+	{
+		app.DebugPrintf("MultiPlayerLevel::putEntity before addEntity id=%d type=%d ptr=%p\n", id, e->GetType(), e.get());
+	}
+#endif
     if (!addEntity(e))
 	{
+#ifdef __ORBIS__
+		if(e != NULL)
+		{
+			app.DebugPrintf("MultiPlayerLevel::putEntity addEntity deferred id=%d type=%d ptr=%p\n", id, e->GetType(), e.get());
+		}
+#endif
         this->reEntries.insert(e);
     }
+#ifdef __ORBIS__
+	else if(e != NULL)
+	{
+		app.DebugPrintf("MultiPlayerLevel::putEntity addEntity success id=%d type=%d ptr=%p inChunk=%d\n", id, e->GetType(), e.get(), e->inChunk);
+	}
+#endif
     entitiesById[id] = e;
+#ifdef __ORBIS__
+	if(e != NULL)
+	{
+		app.DebugPrintf("MultiPlayerLevel::putEntity end id=%d type=%d ptr=%p\n", id, e->GetType(), e.get());
+	}
+#endif
 }
 
 shared_ptr<Entity> MultiPlayerLevel::getEntity(int id)
@@ -912,4 +985,3 @@ void MultiPlayerLevel::removeUnusedTileEntitiesInRegion(int x0, int y0, int z0, 
 
 	LeaveCriticalSection(&m_tileEntityListCS);
 }
-

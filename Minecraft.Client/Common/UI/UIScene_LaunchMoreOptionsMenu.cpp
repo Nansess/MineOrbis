@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "UI.h"
 #include "UIScene_LaunchMoreOptionsMenu.h"
+#include "..\ProfileModeShim.h"
 
 #define GAME_CREATE_ONLINE_TIMER_ID 0
 #define GAME_CREATE_ONLINE_TIMER_TIME 100
@@ -30,7 +31,7 @@ UIScene_LaunchMoreOptionsMenu::UIScene_LaunchMoreOptionsMenu(int iPad, void *ini
 	value[0].number = m_params->bGenerateOptions?0:1;
 	IggyResult out = IggyPlayerCallMethodRS ( getMovie() , &result, IggyPlayerRootPath( getMovie() ), m_funcSetMenuType , 1 , value );
 
-	m_bMultiplayerAllowed = ProfileManager.IsSignedInLive( m_params->iPad ) && ProfileManager.AllowedToPlayMultiplayer(m_params->iPad);
+	m_bMultiplayerAllowed = GameHasOnlineServices(m_params->iPad);
 	
 	bool bOnlineGame, bInviteOnly, bAllowFriendsOfFriends;
 	bOnlineGame				= m_params->bOnlineGame;
@@ -38,7 +39,7 @@ UIScene_LaunchMoreOptionsMenu::UIScene_LaunchMoreOptionsMenu(int iPad, void *ini
 	bAllowFriendsOfFriends	= m_params->bAllowFriendsOfFriends;
 
 	// 4J-PB - to stop an offline game being able to select the online flag
-	if(ProfileManager.IsSignedInLive(m_params->iPad) == false)
+	if(!GameHasOnlineServices(m_params->iPad))
 	{
 		m_checkboxes[eLaunchCheckbox_Online].SetEnable(false);
 	}
@@ -170,7 +171,7 @@ void UIScene_LaunchMoreOptionsMenu::tick()
 {
 	UIScene::tick();
 
-	bool bMultiplayerAllowed = ProfileManager.IsSignedInLive(m_params->iPad) && ProfileManager.AllowedToPlayMultiplayer(m_params->iPad);
+	bool bMultiplayerAllowed = GameHasOnlineServices(m_params->iPad);
 
 	if (bMultiplayerAllowed != m_bMultiplayerAllowed)
 	{

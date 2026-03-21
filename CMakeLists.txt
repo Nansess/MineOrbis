@@ -93,6 +93,31 @@ endfunction()
 generate_orbis_metadata("${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.World/Minecraft.World.vcxproj" world)
 generate_orbis_metadata("${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Minecraft.Client.vcxproj" client)
 
+# The Orbis build is being redirected to the Windows64-style stub networking path.
+# Remove the Sony/PSN-specific network units from the generated source list so they
+# do not get compiled or linked into the Orbis target.
+list(REMOVE_ITEM CLIENT_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Common/Network/Sony/NetworkPlayerSony.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Common/Network/Sony/PlatformNetworkManagerSony.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Common/Network/Sony/SQRNetworkManager.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Common/Network/Sony/SQRNetworkPlayer.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Network/Orbis_NPToolkit.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Network/PsPlusUpsellWrapper_Orbis.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Network/SonyCommerce_Orbis.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Network/SonyRemoteStorage_Orbis.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Network/SQRNetworkManager_Orbis.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Network/SonyVoiceChat_Orbis.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Leaderboards/OrbisLeaderboardManager.cpp"
+)
+
+list(APPEND CLIENT_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Common/Network/PlatformNetworkManagerStub.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Xbox/Network/NetworkPlayerXbox.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Windows64/Leaderboards/WindowsLeaderboardManager.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Network/SonyHttp_Orbis_Stub.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Network/SonyCommerce_Orbis_Stub.cpp"
+)
+
 function(orbis_resolve_path project_dir input output_var)
   set(value "${input}")
   string(REPLACE "$(ProjectDir)" "${project_dir}/" value "${value}")
@@ -205,10 +230,6 @@ target_include_directories(MinecraftClient_orbis PRIVATE ${orbis_common_include_
 # FutureImpl RTTI, so these call sites still need the original local workaround.
 set_source_files_properties(
   "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/ClientConnection.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Leaderboards/OrbisLeaderboardManager.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Network/Orbis_NPToolkit.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Network/SonyCommerce_Orbis.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Orbis/Network/SQRNetworkManager_Orbis.cpp"
   PROPERTIES COMPILE_OPTIONS "-fno-rtti;-fno-exceptions"
 )
 

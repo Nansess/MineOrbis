@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "UI.h"
 #include "UIScene_SkinSelectMenu.h"
+#include "..\ProfileModeShim.h"
 #include "..\..\..\Minecraft.World\StringHelpers.h"
 #ifdef __ORBIS__
 #include <error_dialog.h>
@@ -268,7 +269,7 @@ void UIScene_SkinSelectMenu::handleInput(int iPad, int key, bool repeat, bool pr
 						// 4J-PB - check for a patch
 #ifdef __ORBIS__
 						// 4J-PB - Check if there is a patch for the game
-						int errorCode = ProfileManager.getNPAvailability(ProfileManager.GetPrimaryPad());
+						int errorCode = GameGetNPAvailability(ProfileManager.GetPrimaryPad());
 
 						bool bPatchAvailable;
 						switch(errorCode)
@@ -306,7 +307,7 @@ void UIScene_SkinSelectMenu::handleInput(int iPad, int key, bool repeat, bool pr
 						UINT uiIDA[1] = { IDS_OK };
 #ifdef __ORBIS__
 						// Check if PSN is unavailable because of age restriction
-						int npAvailability = ProfileManager.getNPAvailability(iPad);
+						int npAvailability = GameGetNPAvailability(iPad);
 						if (npAvailability == SCE_NP_ERROR_AGE_RESTRICTION)
 						{
 							ui.RequestMessageBox(IDS_ONLINE_SERVICE_TITLE, IDS_CONTENT_RESTRICTION, uiIDA, 1, iPad, NULL, NULL, app.GetStringTable());
@@ -320,7 +321,7 @@ void UIScene_SkinSelectMenu::handleInput(int iPad, int key, bool repeat, bool pr
 							ui.RequestMessageBox(IDS_PRO_GUESTPROFILE_TITLE, IDS_PRO_GUESTPROFILE_TEXT, uiIDA, 1,iPad,NULL,NULL,app.GetStringTable(),NULL,0,false);
 						}
 						// are we online?
-						else if(!ProfileManager.IsSignedInLive(iPad))
+						else if(!GameIsSignedInLive(iPad))
 						{
 							showNotOnlineDialog(iPad);
 						}
@@ -626,7 +627,7 @@ void UIScene_SkinSelectMenu::InputActionOK(unsigned int iPad)
 					}
 #if defined(__PS3__) || defined(__ORBIS__)
 					// are we online?
-					else if(!ProfileManager.IsSignedInLive(iPad))
+					else if(!GameIsSignedInLive(iPad))
 					{
 						showNotOnlineDialog(iPad);
 					}
@@ -1640,7 +1641,7 @@ void UIScene_SkinSelectMenu::showNotOnlineDialog(int iPad)
 	SQRNetworkManager_Vita::AttemptPSNSignIn(NULL, this);		
 
 #elif defined(__ORBIS__)
-	SQRNetworkManager_Orbis::AttemptPSNSignIn(NULL, this, false, iPad);
+	m_bIgnoreInput = false;
 
 #elif defined(_DURANGO)
 
@@ -1658,7 +1659,7 @@ int UIScene_SkinSelectMenu::UnlockSkinReturned(void *pParam,int iPad,C4JStorage:
 		&&	ProfileManager.IsSignedIn(iPad)
 		)
 	{
-		if (ProfileManager.IsSignedInLive(iPad))
+		if (GameIsSignedInLive(iPad))
 		{
 #if defined(__PS3__) || defined(__ORBIS__) || defined __PSVITA__
 			// need to get info on the pack to see if the user has already downloaded it

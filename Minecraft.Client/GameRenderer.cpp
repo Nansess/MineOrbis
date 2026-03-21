@@ -48,6 +48,7 @@
 
 #include "TexturePackRepository.h"
 #include "TexturePack.h"
+#include "Common\Network\GameNetworkManager.h"
 
 bool GameRenderer::anaglyph3d = false;
 int GameRenderer::anaglyphPass = 0;
@@ -57,12 +58,59 @@ C4JThread*		GameRenderer::m_updateThread;
 C4JThread::EventArray* GameRenderer::m_updateEvents;
 bool GameRenderer::nearThingsToDo = false;
 bool GameRenderer::updateRunning = false;
+bool GameRenderer::m_deferredEnableRequested = false;
 vector<byte *> GameRenderer::m_deleteStackByte;
 vector<SparseLightStorage *> GameRenderer::m_deleteStackSparseLightStorage;
 vector<CompressedTileStorage *> GameRenderer::m_deleteStackCompressedTileStorage;
 vector<SparseDataStorage *> GameRenderer::m_deleteStackSparseDataStorage;
 #endif
 CRITICAL_SECTION GameRenderer::m_csDeleteStack;
+
+namespace
+{
+shared_ptr<Mob> getActiveCameraMob(Minecraft *mc)
+{
+	if( mc == NULL )
+	{
+		return shared_ptr<Mob>();
+	}
+
+	if( mc->cameraTargetPlayer != NULL )
+	{
+		return mc->cameraTargetPlayer;
+	}
+
+	return mc->player;
+}
+
+shared_ptr<LocalPlayer> getActiveLocalCameraPlayer(Minecraft *mc)
+{
+	if( mc == NULL )
+	{
+		return shared_ptr<LocalPlayer>();
+	}
+
+	shared_ptr<LocalPlayer> localPlayer = dynamic_pointer_cast<LocalPlayer>(mc->cameraTargetPlayer);
+	if( localPlayer == NULL )
+	{
+		localPlayer = dynamic_pointer_cast<LocalPlayer>(mc->player);
+	}
+
+	return localPlayer;
+}
+
+int getActiveCameraPad(Minecraft *mc)
+{
+	shared_ptr<LocalPlayer> localPlayer = getActiveLocalCameraPlayer(mc);
+	if( localPlayer != NULL )
+	{
+		return localPlayer->GetXboxPad();
+	}
+
+	int primaryPad = ProfileManager.GetPrimaryPad();
+	return primaryPad >= 0 ? primaryPad : 0;
+}
+}
 
 GameRenderer::GameRenderer(Minecraft *mc)
 {
@@ -407,10 +455,16 @@ float GameRenderer::GetFovVal()
 
 void GameRenderer::tickFov()
 {
-	shared_ptr<LocalPlayer>player = dynamic_pointer_cast<LocalPlayer>(mc->cameraTargetPlayer);
-
-	int playerIdx = player ? player->GetXboxPad() : 0;
-    tFov[playerIdx] = player->getFieldOfViewModifier();
+	shared_ptr<LocalPlayer> player = getActiveLocalCameraPlayer(mc);
+	int playerIdx = getActiveCameraPad(mc);
+	if( player != NULL )
+	{
+		tFov[playerIdx] = player->getFieldOfViewModifier();
+	}
+	else
+	{
+		tFov[playerIdx] = 1.0f;
+	}
 
     oFov[playerIdx] = fov[playerIdx];
     fov[playerIdx] += (tFov[playerIdx] - fov[playerIdx]) * 0.5f;
@@ -420,23 +474,26 @@ float GameRenderer::getFov(float a, bool applyEffects)
 {
 	if (cameraFlip > 0 ) return 90;
 
-	shared_ptr<LocalPlayer> player = dynamic_pointer_cast<LocalPlayer>(mc->cameraTargetPlayer);
-	int playerIdx = player ? player->GetXboxPad() : 0;
+	shared_ptr<Mob> cameraPlayer = getActiveCameraMob(mc);
+	int playerIdx = getActiveCameraPad(mc);
 	float fov = m_fov;//70;
     if (applyEffects)
 	{
         fov += mc->options->fov * 40;
         fov *= this->oFov[playerIdx] + (this->fov[playerIdx] - this->oFov[playerIdx]) * a;
     }
-	if (player->getHealth() <= 0)
+	if (cameraPlayer != NULL && cameraPlayer->getHealth() <= 0)
 	{
-		float duration = player->deathTime + a;
+		float duration = cameraPlayer->deathTime + a;
 
 		fov /= ((1 - 500 / (duration + 500)) * 2.0f + 1);
 	}
 
-    int t = Camera::getBlockAt(mc->level, player, a);
-    if (t != 0 && Tile::tiles[t]->material == Material::water) fov = fov * 60 / 70;
+	if( mc->level != NULL && cameraPlayer != NULL )
+	{
+		int t = Camera::getBlockAt(mc->level, cameraPlayer, a);
+		if (t != 0 && Tile::tiles[t] != NULL && Tile::tiles[t]->material == Material::water) fov = fov * 60 / 70;
+	}
 
 	return fov + fovOffsetO + (fovOffset - fovOffsetO) * a;
 
@@ -444,7 +501,11 @@ float GameRenderer::getFov(float a, bool applyEffects)
 
 void GameRenderer::bobHurt(float a)
 {
-	shared_ptr<Mob> player = mc->cameraTargetPlayer;
+	shared_ptr<Mob> player = getActiveCameraMob(mc);
+	if( player == NULL )
+	{
+		return;
+	}
 
 	float hurt = player->hurtTime - a;
 
@@ -489,8 +550,12 @@ void GameRenderer::bobView(float a)
 
 void GameRenderer::moveCameraToPlayer(float a)
 {
-	shared_ptr<Mob> player = mc->cameraTargetPlayer;
-	shared_ptr<LocalPlayer> localplayer = dynamic_pointer_cast<LocalPlayer>(mc->cameraTargetPlayer);
+	shared_ptr<Mob> player = getActiveCameraMob(mc);
+	shared_ptr<LocalPlayer> localplayer = getActiveLocalCameraPlayer(mc);
+	if( player == NULL )
+	{
+		return;
+	}
 	float heightOffset = player->heightOffset - 1.62f;
 
 	double x = player->xo + (player->x - player->xo) * a;
@@ -520,7 +585,7 @@ void GameRenderer::moveCameraToPlayer(float a)
 	}
 	// 4J-PB - changing this to be per player
 	//else if (mc->options->thirdPersonView)
-	else if (localplayer->ThirdPersonView())
+	else if (localplayer != NULL && localplayer->ThirdPersonView())
 	{
 		double cameraDist = thirdDistanceO + (thirdDistance - thirdDistanceO) * a;
 
@@ -541,7 +606,7 @@ void GameRenderer::moveCameraToPlayer(float a)
 			float xRot = player->xRotO + (player->xRot - player->xRotO) * a;
 
 			// Thirdperson view values are now 0 for disabled, 1 for original mode, 2 for reversed.
-			if( localplayer->ThirdPersonView() == 2 )
+			if( localplayer != NULL && localplayer->ThirdPersonView() == 2 )
 			{
 				// Reverse y rotation - note that this is only used in doing collision to calculate our view
 				// distance, the actual rotation itself is just below this else {} block
@@ -589,7 +654,7 @@ void GameRenderer::moveCameraToPlayer(float a)
 	if (!mc->options->fixedCamera)
 	{
 		glRotatef(player->xRotO + (player->xRot - player->xRotO) * a, 1, 0, 0);
-		if( localplayer->ThirdPersonView() == 2 )
+		if( localplayer != NULL && localplayer->ThirdPersonView() == 2 )
 		{
 			// Third person view is now 0 for disabled, 1 for original, 2 for flipped
 			glRotatef(player->yRotO + (player->yRot - player->yRotO) * a, 0, 1, 0);
@@ -631,14 +696,16 @@ void GameRenderer::getFovAndAspect(float& fov, float& aspect, float a, bool appl
 	aspect = mc->width / (float) mc->height;
 	fov = getFov(a, applyEffects);
 
-	if( ( mc->player->m_iScreenSection == C4JRender::VIEWPORT_TYPE_SPLIT_TOP ) ||
-		( mc->player->m_iScreenSection == C4JRender::VIEWPORT_TYPE_SPLIT_BOTTOM ) )
+	if( mc->player != NULL &&
+		( ( mc->player->m_iScreenSection == C4JRender::VIEWPORT_TYPE_SPLIT_TOP ) ||
+		  ( mc->player->m_iScreenSection == C4JRender::VIEWPORT_TYPE_SPLIT_BOTTOM ) ) )
 	{
 		aspect *= 2.0f;
 		fov *= 0.7f;		// Reduce FOV to make things less fish-eye, at the expense of reducing vertical FOV from single player mode
 	}
-	else if( ( mc->player->m_iScreenSection == C4JRender::VIEWPORT_TYPE_SPLIT_LEFT ) ||
-		( mc->player->m_iScreenSection == C4JRender::VIEWPORT_TYPE_SPLIT_RIGHT) )
+	else if( mc->player != NULL &&
+		( ( mc->player->m_iScreenSection == C4JRender::VIEWPORT_TYPE_SPLIT_LEFT ) ||
+		  ( mc->player->m_iScreenSection == C4JRender::VIEWPORT_TYPE_SPLIT_RIGHT) ) )
 	{
 		// Ideally I'd like to make the fov bigger here, but if I do then you an see that the arm isn't very long...
 		aspect *= 0.5f;
@@ -647,6 +714,13 @@ void GameRenderer::getFovAndAspect(float& fov, float& aspect, float a, bool appl
 
 void GameRenderer::setupCamera(float a, int eye)
 {
+	shared_ptr<Mob> cameraPlayer = getActiveCameraMob(mc);
+	shared_ptr<LocalPlayer> localPlayer = getActiveLocalCameraPlayer(mc);
+	if( cameraPlayer == NULL )
+	{
+		return;
+	}
+
 	renderDistance = (float)(16 * 16 >> (mc->options->viewDistance));
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
@@ -680,16 +754,25 @@ void GameRenderer::setupCamera(float a, int eye)
 	// 4J-PB - this is a per-player option
 	//if (mc->options->bobView) bobView(a);
 	
-	bool bNoLegAnim =(mc->player->getAnimOverrideBitmask()&(1<<HumanoidModel::eAnim_NoLegAnim))!=0;
-	bool bNoBobbingAnim =(mc->player->getAnimOverrideBitmask()&(1<<HumanoidModel::eAnim_NoBobbing))!=0;
+	bool bNoLegAnim = false;
+	bool bNoBobbingAnim = false;
+	if( localPlayer != NULL )
+	{
+		bNoLegAnim = (localPlayer->getAnimOverrideBitmask()&(1<<HumanoidModel::eAnim_NoLegAnim)) != 0;
+		bNoBobbingAnim = (localPlayer->getAnimOverrideBitmask()&(1<<HumanoidModel::eAnim_NoBobbing)) != 0;
 
-	if(app.GetGameSettings(mc->player->GetXboxPad(),eGameSetting_ViewBob) && !mc->player->abilities.flying && !bNoLegAnim && !bNoBobbingAnim) bobView(a);
+		if(app.GetGameSettings(localPlayer->GetXboxPad(),eGameSetting_ViewBob) && !localPlayer->abilities.flying && !bNoLegAnim && !bNoBobbingAnim) bobView(a);
+	}
 
-	float pt = mc->player->oPortalTime + (mc->player->portalTime - mc->player->oPortalTime) * a;
+	float pt = 0.0f;
+	if( localPlayer != NULL )
+	{
+		pt = localPlayer->oPortalTime + (localPlayer->portalTime - localPlayer->oPortalTime) * a;
+	}
 	if (pt > 0)
 	{
         int multiplier = 20;
-        if (mc->player->hasEffect(MobEffect::confusion))
+        if (localPlayer != NULL && localPlayer->hasEffect(MobEffect::confusion))
 		{
             multiplier = 7;
         }
@@ -719,7 +802,11 @@ void GameRenderer::renderItemInHand(float a, int eye)
 {
 	if (cameraFlip > 0) return;
 
-	shared_ptr<LocalPlayer> localplayer = dynamic_pointer_cast<LocalPlayer>(mc->cameraTargetPlayer);
+	shared_ptr<LocalPlayer> localplayer = getActiveLocalCameraPlayer(mc);
+	if( localplayer == NULL )
+	{
+		return;
+	}
 
 	// 4J-PB - to turn off the hand for screenshots, but not when the item held is a map
 	if ( localplayer!=NULL)
@@ -1230,7 +1317,31 @@ void GameRenderer::EnableUpdateThread()
 // 	return;
 // #endif
 #ifdef MULTITHREAD_ENABLE
-	if( updateRunning) return;
+#ifdef __ORBIS__
+	if( g_NetworkManager.IsNetworkThreadRunning() )
+	{
+		if( !m_deferredEnableRequested )
+		{
+			app.DebugPrintf("------------------DeferUpdateThreadUntilFullscreenLoadCompletes--------------------\n");
+		}
+		m_deferredEnableRequested = true;
+		return;
+	}
+#endif
+	if( updateRunning)
+	{
+#ifdef __ORBIS__
+		m_deferredEnableRequested = false;
+#endif
+		return;
+	}
+#ifdef __ORBIS__
+	if( m_deferredEnableRequested )
+	{
+		app.DebugPrintf("------------------EnableDeferredUpdateThread--------------------\n");
+		m_deferredEnableRequested = false;
+	}
+#endif
 	app.DebugPrintf("------------------EnableUpdateThread--------------------\n");
 	updateRunning = true;
 	m_updateEvents->Set(eUpdateCanRun);
@@ -1266,6 +1377,10 @@ void GameRenderer::renderLevel(float a, __int64 until)
 //	if (mc->cameraTargetPlayer == NULL)	// 4J - removed condition as we want to update this is mc->player changes for different local players
 	{
 		mc->cameraTargetPlayer = mc->player;
+	}
+	if( mc->level == NULL || mc->player == NULL || mc->cameraTargetPlayer == NULL )
+	{
+		return;
 	}
 	pick(a);
 

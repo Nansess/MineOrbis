@@ -10,6 +10,13 @@
 #include "Biome.h"
 #include "net.minecraft.world.level.biome.h"
 
+static int getBiomeMappedColor(eMinecraftColour colourId, int fallbackColour)
+{
+	Minecraft *minecraft = Minecraft::GetInstance();
+	ColourTable *colourTable = minecraft != NULL ? minecraft->getColourTable() : NULL;
+	return colourTable != NULL ? colourTable->getColor(colourId) : fallbackColour;
+}
+
 //public static final Biome[] biomes = new Biome[256];
 Biome *Biome::biomes[256];
 
@@ -214,7 +221,7 @@ int Biome::getSkyColor(float temp)
     //return Color::getHSBColor(224 / 360.0f - temp * 0.05f, 0.50f + temp * 0.1f, 1.0f).getRGB();
 	
 	// 4J Stu - Load colour from texture pack
-	return Minecraft::GetInstance()->getColourTable()->getColor( m_skyColor );
+	return getBiomeMappedColor(m_skyColor, 0x7ba5ff);
 }
 
 vector<Biome::MobSpawnerData *> *Biome::getMobs(MobCategory *category)
@@ -289,7 +296,7 @@ int Biome::getGrassColor()
     //double rain = Mth::clamp(getDownfall(), 0.0f, 1.0f);
 
     //return GrassColor::get(temp, rain);
-	return Minecraft::GetInstance()->getColourTable()->getColor( m_grassColor );
+	return getBiomeMappedColor(m_grassColor, 0x48b518);
 }
 
 int Biome::getFolageColor()
@@ -298,11 +305,11 @@ int Biome::getFolageColor()
     //double rain = Mth::clamp(getDownfall(), 0.0f, 1.0f);
 
     //return FoliageColor::get(temp, rain);
-	return Minecraft::GetInstance()->getColourTable()->getColor( m_foliageColor );
+	return getBiomeMappedColor(m_foliageColor, 0x48b518);
 }
 
 // 4J Added
 int Biome::getWaterColor()
 {
-	return Minecraft::GetInstance()->getColourTable()->getColor( m_waterColor );
+	return getBiomeMappedColor(m_waterColor, 0x3f76e4);
 }

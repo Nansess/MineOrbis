@@ -5,6 +5,9 @@
 #include "File.h"
 #include <xuiapp.h>
 #include "compression.h"
+#ifdef __ORBIS__
+#include "..\Minecraft.Client\Common\zlib\zlib.h"
+#endif
 #include "..\Minecraft.Client\Minecraft.h"
 #include "..\Minecraft.Client\MinecraftServer.h"
 #include "..\Minecraft.Client\ServerLevel.h"
@@ -407,6 +410,9 @@ FileEntry *ConsoleSaveFileSplit::GetRegionFileEntry(unsigned int regionIndex)
 
 ConsoleSaveFileSplit::ConsoleSaveFileSplit(const wstring &fileName, LPVOID pvSaveData /*= NULL*/, DWORD dFileSize /*= 0*/, bool forceCleanSave /*= false*/, ESavePlatform plat /*= SAVE_FILE_PLATFORM_LOCAL*/)
 {
+#ifdef __ORBIS__
+	app.DebugPrintf("*** ORBIS ConsoleSaveFileSplit ctor for %S plat=%08x\n", fileName.c_str(), plat);
+#endif
 	DWORD fileSize = dFileSize;
 
 	// Load a save from the game rules
@@ -459,6 +465,9 @@ ConsoleSaveFileSplit::ConsoleSaveFileSplit(const wstring &fileName, LPVOID pvSav
 
 ConsoleSaveFileSplit::ConsoleSaveFileSplit(ConsoleSaveFile *sourceSave, bool alreadySmallRegions, ProgressListener *progress)
 {
+#ifdef __ORBIS__
+	app.DebugPrintf("*** ORBIS ConsoleSaveFileSplit copy-ctor from %S plat=%08x\n", sourceSave->getFilename().c_str(), sourceSave->getSavePlatform());
+#endif
 	_init(sourceSave->getFilename(), NULL, 0, sourceSave->getSavePlatform());
 
 	header.setOriginalSaveVersion(sourceSave->getOriginalSaveVersion());
@@ -1416,7 +1425,12 @@ void ConsoleSaveFileSplit::Flush(bool autosave, bool updateThumbnail)
 	// Assume that the compression will make it smaller so initially attempt to allocate the current file size
 	// We add 4 bytes to the start so that we can signal compressed data
 	// And another 4 bytes to store the decompressed data size
+#ifdef __ORBIS__
+	unsigned int compLength = (unsigned int)compressBound((uLong)fileSize)+8;
+#else
 	unsigned int compLength = fileSize+8;
+#endif
+	unsigned int requestedCompLength = compLength;
 
 	// 4J Stu - Added TU-1 interim
 
@@ -1451,6 +1465,7 @@ void ConsoleSaveFileSplit::Flush(bool autosave, bool updateThumbnail)
 		// We add 4 bytes to the start so that we can signal compressed data
 		// And another 4 bytes to store the decompressed data size
 		compLength = compLength+8;
+		requestedCompLength = compLength;
 
 		// Attempt to allocate the required memory
 #ifdef __ORBIS__
@@ -1466,7 +1481,7 @@ void ConsoleSaveFileSplit::Flush(bool autosave, bool updateThumbnail)
 		PIXBeginNamedEvent(0,"Actual save compression");
 		// Save the start time
 		QueryPerformanceCounter( &qwTime );
-		Compression::getCompression()->Compress(compData+8,&compLength,pvSaveMem,fileSize);
+		HRESULT compressResult = Compression::getCompression()->Compress(compData+8,&compLength,pvSaveMem,fileSize);
 		QueryPerformanceCounter( &qwNewTime );
 
 		qwDeltaTime.QuadPart = qwNewTime.QuadPart - qwTime.QuadPart;
@@ -1474,6 +1489,27 @@ void ConsoleSaveFileSplit::Flush(bool autosave, bool updateThumbnail)
 
 		app.DebugPrintf("Compress: Elapsed time %f\n", fElapsedTime);
 		PIXEndNamedEvent();
+
+		if(compressResult != S_OK)
+		{
+#ifdef __ORBIS__
+			app.DebugPrintf("ConsoleSaveFileSplit::Flush - compression failed hr=0x%08x fileSize=%u requested=%u\n",
+				compressResult, fileSize, requestedCompLength);
+#endif
+			free(compData);
+			ReleaseSaveAccess();
+			return;
+		}
+
+		if(compLength == 0 && fileSize != 0)
+		{
+#ifdef __ORBIS__
+			app.DebugPrintf("ConsoleSaveFileSplit::Flush - compression returned 0 bytes for fileSize=%u, aborting save\n", fileSize);
+#endif
+			free(compData);
+			ReleaseSaveAccess();
+			return;
+		}
 
 		ZeroMemory(compData,8);
 		int saveVer = 0;
@@ -1806,6 +1842,11 @@ vector<FileEntry *> *ConsoleSaveFileSplit::getRegionFilesByDimension(unsigned in
 	}
 
 	return files;
+}
+
+bool ConsoleSaveFileSplit::usesSplitSaves()
+{
+	return true;
 }
 
 #if defined(__PS3__) || defined(__ORBIS__)
