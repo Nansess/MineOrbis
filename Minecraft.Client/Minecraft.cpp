@@ -1085,7 +1085,7 @@ shared_ptr<MultiplayerLocalPlayer> Minecraft::createExtraLocalPlayer(int idx, co
 		localplayers[idx]->setOnlineXuid(playerXUIDOnline);
 		localplayers[idx]->setIsGuest(ProfileManager.IsGuest(idx));
 
-		localplayers[idx]->displayName = ProfileManager.GetDisplayName(idx);
+		localplayers[idx]->displayName = GameGetLocalDisplayName(idx);
 
 		localplayers[idx]->m_iScreenSection = tempScreenSection;
 
@@ -2931,7 +2931,7 @@ void Minecraft::tick(bool bFirst, bool bUpdateTextures)
 								{
 									*piUse=IDS_TOOLTIPS_TAME;
 								}
-								else if (equalsIgnoreCase(player->getUUID(), wolf->getOwnerUUID()))
+								else if (player->matchesSavedOwnerIdentity(wolf->getOwnerUUID()))
 								{
 									if(wolf->isSitting())
 									{
@@ -2984,7 +2984,7 @@ void Minecraft::tick(bool bFirst, bool bUpdateTextures)
 										break;
 									}
 
-									if (equalsIgnoreCase(player->getUUID(), wolf->getOwnerUUID()))
+									if (player->matchesSavedOwnerIdentity(wolf->getOwnerUUID()))
 									{
 										if(wolf->isSitting())
 										{
@@ -3035,7 +3035,7 @@ void Minecraft::tick(bool bFirst, bool bUpdateTextures)
 									}
 
 								}
-								else if (equalsIgnoreCase(player->getUUID(), ocelot->getOwnerUUID()))
+								else if (player->matchesSavedOwnerIdentity(ocelot->getOwnerUUID()))
 								{
 									if(ocelot->isSitting())
 									{
@@ -3933,7 +3933,7 @@ void Minecraft::setLevel(MultiPlayerLevel *level, int message /*=-1*/, shared_pt
 			player->setXuid(playerXUIDOffline);
 			player->setOnlineXuid(playerXUIDOnline);
 
-			player->displayName = ProfileManager.GetDisplayName(iPrimaryPlayer);
+			player->displayName = GameGetLocalDisplayName(iPrimaryPlayer);
 
 
 
@@ -4147,7 +4147,7 @@ void Minecraft::respawnPlayer(int iPad, int dimension, int newEntityId)
 	player->setOnlineXuid(playerXUIDOnline);
 	player->setIsGuest( ProfileManager.IsGuest(iTempPad) );
 
-	player->displayName = ProfileManager.GetDisplayName(iPad);
+	player->displayName = GameGetLocalDisplayName(iPad);
 
 	player->SetXboxPad(iTempPad);
 

@@ -3,6 +3,7 @@
 #include "UIScene_HUD.h"
 #include "..\..\Minecraft.h"
 #include "..\..\MultiplayerLocalPlayer.h"
+#include "..\ProfileModeShim.h"
 #include "..\..\..\Minecraft.World\net.minecraft.world.entity.boss.enderdragon.h"
 #include "..\..\EnderDragonRenderer.h"
 #include "..\..\..\Minecraft.World\net.minecraft.world.inventory.h"
@@ -277,7 +278,7 @@ void UIScene_HUD::handleReload()
 	}
 	SetHudSize(iGuiScale);
 
-	SetDisplayName(ProfileManager.GetDisplayName(m_iPad));
+	SetDisplayName(GameGetLocalDisplayName(m_iPad));
 
 	repositionHud();
 
@@ -787,7 +788,7 @@ void UIScene_HUD::handleGameTick()
 		}
 		SetHudSize(iGuiScale);
 
-		SetDisplayName(ProfileManager.GetDisplayName(m_iPad));
+		SetDisplayName(GameGetLocalDisplayName(m_iPad));
 		
 		SetTooltipsEnabled(((ui.GetMenuDisplayed(ProfileManager.GetPrimaryPad())) || (app.GetGameSettings(ProfileManager.GetPrimaryPad(),eGameSetting_Tooltips) != 0)));
 

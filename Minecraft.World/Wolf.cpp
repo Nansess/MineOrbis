@@ -369,7 +369,7 @@ bool Wolf::interact(shared_ptr<Player> player)
 				}
 			}
 		}
-		if (equalsIgnoreCase(player->getUUID(), getOwnerUUID()))
+		if (player->matchesSavedOwnerIdentity(getOwnerUUID()))
 		{
 			if (!level->isClientSide && !isFood(item))
 			{

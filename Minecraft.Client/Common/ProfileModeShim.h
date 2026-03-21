@@ -1,5 +1,9 @@
 #pragma once
 
+#ifdef __ORBIS__
+wstring OrbisGetConfiguredDisplayName(int iPad);
+#endif
+
 inline bool GameHasUsableLocalProfile(int iPad)
 {
 #ifdef __ORBIS__
@@ -54,6 +58,9 @@ inline bool GameHasOnlineServices(int iPad)
 
 inline wstring GameGetLocalDisplayName(int iPad)
 {
+#ifdef __ORBIS__
+	return OrbisGetConfiguredDisplayName(iPad);
+#else
 	wstring displayName = ProfileManager.GetDisplayName(iPad);
 	if (!displayName.empty())
 	{
@@ -61,6 +68,7 @@ inline wstring GameGetLocalDisplayName(int iPad)
 	}
 
 	return L"Player";
+#endif
 }
 
 inline char *GameGetOnlineName(int iPad)

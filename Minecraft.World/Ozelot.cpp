@@ -204,7 +204,7 @@ bool Ozelot::interact(shared_ptr<Player> player)
 	shared_ptr<ItemInstance> item = player->inventory->getSelected();
 	if (isTame())
 	{
-		if (equalsIgnoreCase(player->getUUID(), getOwnerUUID()))
+		if (player->matchesSavedOwnerIdentity(getOwnerUUID()))
 		{
 			if (!level->isClientSide && !isFood(item))
 			{

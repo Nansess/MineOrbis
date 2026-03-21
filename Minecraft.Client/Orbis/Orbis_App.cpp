@@ -11,6 +11,7 @@
 #include "..\..\Minecraft.World\BiomeSource.h"
 #include "..\..\Minecraft.World\LevelType.h"
 #include "..\..\Orbis\Network\SonyCommerce_Orbis.h"
+#include "..\Common\ProfileModeShim.h"
 #include "..\..\Minecraft.World\StringHelpers.h"
 
 #include <system_service.h>
@@ -383,7 +384,7 @@ void CConsoleMinecraftApp::TemporaryCreateGameStart()
 	Minecraft *pMinecraft=Minecraft::GetInstance();
 	app.ReleaseSaveThumbnail();
 	ProfileManager.SetLockedProfile(0);
-	pMinecraft->user->name = L"Orbis";
+	pMinecraft->user->name = app.GetConfiguredDisplayName(0);
 	app.ApplyGameSettingsChanged(0);
 
 	////////////////////////////////////////////////////////////////////////////////////////////// From CScene_MultiGameJoinLoad::OnInit

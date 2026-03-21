@@ -194,6 +194,16 @@ stage() {
     mkdir -p "$PS4_GAME_DIR/sce_module"
     cp -f "$SDK_DIR/target/sce_module/libSceFios2.prx" "$PS4_GAME_DIR/sce_module/libSceFios2.prx"
   fi
+
+  if [[ -d "$CLIENT_DIR/OrbisMedia/DLC" ]]; then
+    mkdir -p "$PS4_GAME_DIR/DLC"
+    cp -af "$CLIENT_DIR/OrbisMedia/DLC/." "$PS4_GAME_DIR/DLC/"
+  fi
+
+  if [[ -d "$CLIENT_DIR/Orbis/DLCImages" ]]; then
+    mkdir -p "$PS4_GAME_DIR/Orbis/DLCImages"
+    cp -af "$CLIENT_DIR/Orbis/DLCImages/." "$PS4_GAME_DIR/Orbis/DLCImages/"
+  fi
 }
 
 extract_sfo_field() {

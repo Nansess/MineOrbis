@@ -92,7 +92,10 @@ namespace
 	static const DWORD ORBIS_GLOBAL_SETTINGS_MAGIC = 0x3147534d; // MSG1
 	static const DWORD ORBIS_GLOBAL_SETTINGS_VERSION = 1;
 	static const DWORD ORBIS_GLOBAL_SETTINGS_FLAG_DEBUG_ENABLED = 0x00000001;
-	static const char *ORBIS_GLOBAL_SETTINGS_PATH = "/data/minecraft/settings";
+	static const char *ORBIS_SETTINGS_DIRECTORY_PATH = "/data/minecraft/settings";
+	static const char *ORBIS_GLOBAL_SETTINGS_PATH = "/data/minecraft/settings/global.bin";
+	static const char *ORBIS_GLOBAL_SETTINGS_MIGRATION_PATH = "/data/minecraft/settings_legacy.bin";
+	static const char *ORBIS_USERNAME_PATH = "/data/minecraft/settings/username.txt";
 
 	struct OrbisGlobalSettingsHeader
 	{
@@ -101,6 +104,101 @@ namespace
 		DWORD dwSettingsBytes;
 		DWORD dwFlags;
 	};
+
+	static bool OrbisPathIsDirectory(DWORD attributes)
+	{
+		return attributes != (DWORD)-1 && (attributes & FILE_ATTRIBUTE_DIRECTORY) == FILE_ATTRIBUTE_DIRECTORY;
+	}
+
+	static bool OrbisReadTextFile(const char *path, string &contents)
+	{
+		HANDLE hFile = CreateFile(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+		if(hFile == INVALID_HANDLE_VALUE)
+		{
+			return false;
+		}
+
+		DWORD fileSize = GetFileSize(hFile, NULL);
+		if(fileSize == 0xFFFFFFFF)
+		{
+			CloseHandle(hFile);
+			return false;
+		}
+
+		vector<char> buffer(fileSize + 1, 0);
+		DWORD bytesRead = 0;
+		BOOL ok = TRUE;
+		if(fileSize > 0)
+		{
+			ok = ReadFile(hFile, &buffer[0], fileSize, &bytesRead, NULL);
+		}
+		CloseHandle(hFile);
+
+		if(ok == FALSE || bytesRead != fileSize)
+		{
+			return false;
+		}
+
+		contents.assign(buffer.begin(), buffer.begin() + fileSize);
+		return true;
+	}
+
+	static bool OrbisWriteTextFile(const char *path, const string &contents)
+	{
+		HANDLE hFile = CreateFile(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		if(hFile == INVALID_HANDLE_VALUE)
+		{
+			return false;
+		}
+
+		DWORD bytesWritten = 0;
+		BOOL ok = TRUE;
+		if(!contents.empty())
+		{
+			ok = WriteFile(hFile, contents.data(), (DWORD)contents.size(), &bytesWritten, NULL);
+		}
+		CloseHandle(hFile);
+
+		if(ok == FALSE)
+		{
+			return false;
+		}
+
+		return bytesWritten == contents.size();
+	}
+
+	static wstring OrbisSanitizeConfiguredDisplayName(const wstring &displayName)
+	{
+		wstring sanitized = trimString(displayName);
+		sanitized = replaceAll(sanitized, L"\r", L"");
+		sanitized = replaceAll(sanitized, L"\n", L"");
+		sanitized = replaceAll(sanitized, L"\t", L" ");
+
+		while(sanitized.find(L"  ") != wstring::npos)
+		{
+			sanitized = replaceAll(sanitized, L"  ", L" ");
+		}
+
+		sanitized = trimString(sanitized);
+		if(sanitized.length() > Player::MAX_NAME_LENGTH)
+		{
+			sanitized = trimString(sanitized.substr(0, Player::MAX_NAME_LENGTH));
+		}
+
+		if(equalsIgnoreCase(sanitized, L"stub"))
+		{
+			sanitized.clear();
+		}
+
+		return sanitized;
+	}
+}
+#endif
+
+#ifdef __ORBIS__
+wstring OrbisGetConfiguredDisplayName(int iPad)
+{
+	return app.GetConfiguredDisplayName(iPad);
 }
 #endif
 
@@ -156,6 +254,10 @@ CMinecraftApp::CMinecraftApp()
 	m_bLiveLinkRequired = false;
 	m_bChangingSessionType = false;
 	m_bReallyChangingSessionType = false;
+	m_bSuppressImmediateSettingsPersistence = false;
+#ifdef __ORBIS__
+	m_bConfiguredDisplayNameLoaded = false;
+#endif
 
 #ifdef _DEBUG_MENUS_ENABLED
 
@@ -697,7 +799,17 @@ void CMinecraftApp::InitGameSettings()
 #elif defined __PS3__ || defined __ORBIS__ || defined _DURANGO  || defined __PSVITA__
 		C4JStorage::PROFILESETTINGS *pProfileSettings=StorageManager.GetDashboardProfileSettings(i);
 		// 4J-PB - don't cause an options write to happen here
+#ifdef __ORBIS__
+		m_bSuppressImmediateSettingsPersistence = true;
+#endif
 		SetDefaultOptions(pProfileSettings,i,false);
+#ifdef __ORBIS__
+		if(LoadGlobalSettingsFromDisk(i))
+		{
+			ApplyGameSettingsChanged(i);
+		}
+		m_bSuppressImmediateSettingsPersistence = false;
+#endif
 
 #endif
 	}
@@ -823,9 +935,168 @@ int CMinecraftApp::GetOptionsBlocksRequired(int iPad)
 	return m_eOptionsBlocksRequiredA[iPad];
 }
 
+wstring CMinecraftApp::GetConfiguredDisplayName(int iPad)
+{
+	if(iPad < 0 || iPad >= XUSER_MAX_COUNT)
+	{
+		iPad = 0;
+	}
+
+	if(!m_bConfiguredDisplayNameLoaded)
+	{
+		LoadConfiguredDisplayNameFromDisk(iPad);
+	}
+
+	return m_wsConfiguredDisplayName;
+}
+
+bool CMinecraftApp::EnsureOrbisSettingsDirectoryReady()
+{
+	CreateDirectory("/data/minecraft", NULL);
+
+	DWORD settingsAttributes = GetFileAttributes(ORBIS_SETTINGS_DIRECTORY_PATH);
+	if(settingsAttributes != (DWORD)-1 && !OrbisPathIsDirectory(settingsAttributes))
+	{
+		const char *migrationPath = ORBIS_GLOBAL_SETTINGS_MIGRATION_PATH;
+		char generatedMigrationPath[128];
+		if(GetFileAttributes(migrationPath) != (DWORD)-1)
+		{
+			SYSTEMTIME currentTime;
+			GetSystemTime(&currentTime);
+			snprintf(generatedMigrationPath, sizeof(generatedMigrationPath),
+				"/data/minecraft/settings_legacy_%04u%02u%02u%02u%02u%02u.bin",
+				currentTime.wYear,
+				currentTime.wMonth,
+				currentTime.wDay,
+				currentTime.wHour,
+				currentTime.wMinute,
+				currentTime.wSecond);
+			migrationPath = generatedMigrationPath;
+		}
+
+		if(!MoveFile(ORBIS_SETTINGS_DIRECTORY_PATH, migrationPath))
+		{
+			app.DebugPrintf("EnsureOrbisSettingsDirectoryReady: failed to migrate legacy %s\n", ORBIS_SETTINGS_DIRECTORY_PATH);
+			return false;
+		}
+
+		settingsAttributes = (DWORD)-1;
+		if(CreateDirectory(ORBIS_SETTINGS_DIRECTORY_PATH, NULL) == FALSE &&
+			!OrbisPathIsDirectory(GetFileAttributes(ORBIS_SETTINGS_DIRECTORY_PATH)))
+		{
+			app.DebugPrintf("EnsureOrbisSettingsDirectoryReady: failed to create %s\n", ORBIS_SETTINGS_DIRECTORY_PATH);
+			return false;
+		}
+
+		if(GetFileAttributes(ORBIS_GLOBAL_SETTINGS_PATH) == (DWORD)-1 && !MoveFile(migrationPath, ORBIS_GLOBAL_SETTINGS_PATH))
+		{
+			app.DebugPrintf("EnsureOrbisSettingsDirectoryReady: failed to move migrated settings into %s\n", ORBIS_GLOBAL_SETTINGS_PATH);
+		}
+
+		return true;
+	}
+
+	if(settingsAttributes == (DWORD)-1 &&
+		CreateDirectory(ORBIS_SETTINGS_DIRECTORY_PATH, NULL) == FALSE &&
+		!OrbisPathIsDirectory(GetFileAttributes(ORBIS_SETTINGS_DIRECTORY_PATH)))
+	{
+		app.DebugPrintf("EnsureOrbisSettingsDirectoryReady: failed to create %s\n", ORBIS_SETTINGS_DIRECTORY_PATH);
+		return false;
+	}
+
+	return true;
+}
+
+wstring CMinecraftApp::GetDefaultConfiguredDisplayName(int iPad)
+{
+	if(iPad < 0 || iPad >= XUSER_MAX_COUNT)
+	{
+		iPad = 0;
+	}
+
+	wstring displayName = OrbisSanitizeConfiguredDisplayName(ProfileManager.GetDisplayName(iPad));
+	if(!displayName.empty())
+	{
+		return displayName;
+	}
+
+	char *gamertag = ProfileManager.GetGamertag(iPad);
+	if(gamertag != NULL && gamertag[0] != 0)
+	{
+		displayName = OrbisSanitizeConfiguredDisplayName(convStringToWstring(gamertag));
+		if(!displayName.empty())
+		{
+			return displayName;
+		}
+	}
+
+	return L"Player";
+}
+
+void CMinecraftApp::LoadConfiguredDisplayNameFromDisk(int iPad)
+{
+	wstring configuredDisplayName = GetDefaultConfiguredDisplayName(iPad);
+	bool loadedFromDisk = false;
+
+	if(EnsureOrbisSettingsDirectoryReady())
+	{
+		string fileContents;
+		if(OrbisReadTextFile(ORBIS_USERNAME_PATH, fileContents))
+		{
+			wstring loadedDisplayName = OrbisSanitizeConfiguredDisplayName(convStringToWstring(fileContents));
+			if(!loadedDisplayName.empty())
+			{
+				configuredDisplayName = loadedDisplayName;
+				loadedFromDisk = true;
+			}
+		}
+	}
+
+	m_wsConfiguredDisplayName = configuredDisplayName;
+	m_bConfiguredDisplayNameLoaded = true;
+
+	if(!loadedFromDisk)
+	{
+		SaveConfiguredDisplayNameToDisk(configuredDisplayName);
+	}
+}
+
+void CMinecraftApp::SaveConfiguredDisplayNameToDisk(const wstring &displayName)
+{
+	if(!EnsureOrbisSettingsDirectoryReady())
+	{
+		return;
+	}
+
+	wstring sanitizedDisplayName = OrbisSanitizeConfiguredDisplayName(displayName);
+	if(sanitizedDisplayName.empty())
+	{
+		sanitizedDisplayName = L"Player";
+	}
+
+	char displayNameBuffer[256];
+	size_t convertedLength = wcstombs(displayNameBuffer, sanitizedDisplayName.c_str(), sizeof(displayNameBuffer) - 1);
+	if(convertedLength == (size_t)-1)
+	{
+		app.DebugPrintf("SaveConfiguredDisplayNameToDisk: failed to encode username\n");
+		return;
+	}
+
+	displayNameBuffer[convertedLength] = 0;
+	if(!OrbisWriteTextFile(ORBIS_USERNAME_PATH, string(displayNameBuffer, convertedLength)))
+	{
+		app.DebugPrintf("SaveConfiguredDisplayNameToDisk: failed to write %s\n", ORBIS_USERNAME_PATH);
+	}
+}
+
 bool CMinecraftApp::LoadGlobalSettingsFromDisk(int iPad)
 {
 	if(iPad < 0 || iPad >= XUSER_MAX_COUNT || GameSettingsA[iPad] == NULL)
+	{
+		return false;
+	}
+
+	if(!EnsureOrbisSettingsDirectoryReady())
 	{
 		return false;
 	}
@@ -882,7 +1153,10 @@ void CMinecraftApp::SaveGlobalSettingsToDisk(int iPad)
 		return;
 	}
 
-	CreateDirectory("/data/minecraft", NULL);
+	if(!EnsureOrbisSettingsDirectoryReady())
+	{
+		return;
+	}
 
 	HANDLE hFile = CreateFile(ORBIS_GLOBAL_SETTINGS_PATH, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	if(hFile == INVALID_HANDLE_VALUE)
@@ -2173,7 +2447,8 @@ void CMinecraftApp::SetGameSettings(int iPad,eGameSetting eVal,unsigned char ucV
 	updatedSettings.bSettingsChanged = false;
 	// Mirror settings changes immediately so runtime tweaks survive a crash/restart
 	// even before the deferred profile write runs.
-	if(memcmp(&updatedSettings, &originalSettings, sizeof(GAME_SETTINGS)) != 0)
+	if(!m_bSuppressImmediateSettingsPersistence &&
+		memcmp(&updatedSettings, &originalSettings, sizeof(GAME_SETTINGS)) != 0)
 	{
 		SaveGlobalSettingsToDisk(iPad);
 	}
@@ -3696,7 +3971,7 @@ void CMinecraftApp::HandleXuiActions(void)
 #endif
 
 					// change the minecraft player name
-					Minecraft::GetInstance()->user->name = convStringToWstring( ProfileManager.GetGamertag(ProfileManager.GetPrimaryPad()));
+					Minecraft::GetInstance()->user->name = GameGetLocalDisplayName(ProfileManager.GetPrimaryPad());
 
 					bool success = g_NetworkManager.JoinGameFromInviteInfo(
 						inviteData->dwUserIndex, // dwUserIndex
@@ -3796,6 +4071,18 @@ void CMinecraftApp::HandleXuiActions(void)
 				break;
 			case eAppAction_SetDefaultOptions:
 				SetAction(i,eAppAction_Idle);
+#ifdef __ORBIS__
+				// The raw-save fallback stores runtime settings outside the options
+				// save container. If the profile layer asks for defaults because the
+				// options data is unavailable, restore the persisted raw settings
+				// instead of overwriting them with defaults again.
+				if(LoadGlobalSettingsFromDisk(i))
+				{
+					ClearGameSettingsChangedFlag(i);
+					ApplyGameSettingsChanged(i);
+					break;
+				}
+#endif
 #if ( defined __PS3__ || defined __ORBIS__ || defined _DURANGO || defined __PSVITA__)
 				SetDefaultOptions((C4JStorage::PROFILESETTINGS *)param,i);		
 #else
@@ -4763,7 +5050,7 @@ void CMinecraftApp::SignInChangeCallback(LPVOID pParam,bool bPrimaryPlayerChange
 {
 #ifdef __PS3__
 	// this is normally set in the main menu, but we can go online in the create world screens, and the primary player name isn't updated
-	Minecraft::GetInstance()->user->name = convStringToWstring( ProfileManager.GetGamertag(ProfileManager.GetPrimaryPad()));
+	Minecraft::GetInstance()->user->name = GameGetLocalDisplayName(ProfileManager.GetPrimaryPad());
 #endif
 
 	CMinecraftApp *pApp=(CMinecraftApp *)pParam;

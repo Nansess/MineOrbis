@@ -211,6 +211,7 @@ public:
 #ifdef __ORBIS__
 	static int		OptionsDataCallback(LPVOID pParam,int iPad,unsigned short usVersion,C4JStorage::eOptionsCallback eStatus,int iBlocksRequired);
 	int				GetOptionsBlocksRequired(int iPad);
+	wstring			GetConfiguredDisplayName(int iPad);
 	bool			LoadGlobalSettingsFromDisk(int iPad);
 	void			SaveGlobalSettingsToDisk(int iPad);
 #else
@@ -523,6 +524,15 @@ private:
 
 	JoinFromInviteData m_InviteData;
 	bool m_bDebugOptions; // toggle debug things on or off
+	bool m_bSuppressImmediateSettingsPersistence;
+#ifdef __ORBIS__
+	bool m_bConfiguredDisplayNameLoaded;
+	wstring m_wsConfiguredDisplayName;
+	bool EnsureOrbisSettingsDirectoryReady();
+	wstring GetDefaultConfiguredDisplayName(int iPad);
+	void LoadConfiguredDisplayNameFromDisk(int iPad);
+	void SaveConfiguredDisplayNameToDisk(const wstring &displayName);
+#endif
 
 	// Trial timer
 	float m_fTrialTimerStart,mfTrialPausedTime;

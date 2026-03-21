@@ -349,7 +349,7 @@ HRESULT InitD3D( IDirect3DDevice9 **ppDevice,
 	pd3dPP->EnableAutoDepthStencil = TRUE;
 	pd3dPP->AutoDepthStencilFormat = D3DFMT_D24S8;
 	pd3dPP->SwapEffect             = D3DSWAPEFFECT_DISCARD;
-	pd3dPP->PresentationInterval   = D3DPRESENT_INTERVAL_ONE;
+	pd3dPP->PresentationInterval   = D3DPRESENT_INTERVAL_IMMEDIATE;
 	//pd3dPP->Flags				   = D3DPRESENTFLAG_NO_LETTERBOX;
 	//ERR[D3D]: Can't set D3DPRESENTFLAG_NO_LETTERBOX when wide-screen is enabled
 	//	in the launcher/dashboard.

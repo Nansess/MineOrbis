@@ -588,6 +588,10 @@ Tile *Tile::setExplodeable(float explosionResistance)
 
 bool Tile::isSolidBlockingTile(int t)
 {
+	if ((unsigned int)t >= TILE_NUM_COUNT)
+	{
+		return false;
+	}
 	Tile *tile = Tile::tiles[t];
 	if (tile == NULL) return false;
 	return tile->material->isSolidBlocking() && tile->isCubeShaped();

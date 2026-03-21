@@ -412,6 +412,7 @@ public:
 	PlayerUID getOnlineXuid()																	{ return m_OnlineXuid; }
 	void setUUID(const wstring &UUID)															{ m_UUID = UUID; }
 	wstring getUUID()																			{ return m_UUID; }
+	bool matchesSavedOwnerIdentity(const wstring &identity) const;
 
 	void setPlayerIndex(DWORD dwIndex)														{ m_playerIndex = dwIndex; }
 	DWORD getPlayerIndex()																	{ return m_playerIndex; }

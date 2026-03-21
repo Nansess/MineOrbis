@@ -747,7 +747,29 @@ void Player::setXuid(PlayerUID xuid)
 	// This should just be a string version of the xuid
 
 	setUUID( xuid.toString() );
+#elif defined(__ORBIS__)
+	if(xuid != INVALID_XUID)
+	{
+		setUUID( xuid.toString() );
+	}
 #endif
+}
+
+bool Player::matchesSavedOwnerIdentity(const wstring &identity) const
+{
+	if(equalsIgnoreCase(m_UUID, identity))
+	{
+		return true;
+	}
+
+#ifdef __ORBIS__
+	if(equalsIgnoreCase(name, identity))
+	{
+		return true;
+	}
+#endif
+
+	return false;
 }
 
 void Player::setCustomCape(DWORD capeId)
@@ -1407,7 +1429,7 @@ void Player::directAllTameWolvesOnTarget(shared_ptr<Mob> target, bool skipSittin
 	if (dynamic_pointer_cast<Wolf>(target) != NULL)
 	{
 		shared_ptr<Wolf> wolfTarget = dynamic_pointer_cast<Wolf>(target);
-		if (wolfTarget->isTame() && m_UUID.compare( wolfTarget->getOwnerUUID() ) == 0 )
+		if (wolfTarget->isTame() && matchesSavedOwnerIdentity(wolfTarget->getOwnerUUID()))
 		{
 			return;
 		}
@@ -1425,7 +1447,7 @@ void Player::directAllTameWolvesOnTarget(shared_ptr<Mob> target, bool skipSittin
 	for (AUTO_VAR(it, nearbyWolves->begin()); it != itEnd; it++)
 	{
 		shared_ptr<Wolf> wolf = dynamic_pointer_cast<Wolf>(*it);;
-		if (wolf->isTame() && wolf->getAttackTarget() == NULL && m_UUID.compare( wolf->getOwnerUUID() ) == 0)
+		if (wolf->isTame() && wolf->getAttackTarget() == NULL && matchesSavedOwnerIdentity(wolf->getOwnerUUID()))
 		{
 			if (!skipSitting || !wolf->isSitting())
 			{

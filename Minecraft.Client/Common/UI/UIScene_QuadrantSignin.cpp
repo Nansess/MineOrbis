@@ -2,6 +2,7 @@
 #include "UI.h"
 #include "UIScene_QuadrantSignin.h"
 #include "..\..\Minecraft.h"
+#include "..\ProfileModeShim.h"
 #if defined(__ORBIS__)
 #include "Common\Network\Sony\SonyHttp.h"
 #endif
@@ -35,7 +36,7 @@ UIScene_QuadrantSignin::UIScene_QuadrantSignin(int iPad, void *_initData, UILaye
 			app.DebugPrintf("Index %d is signed in\n", i);
 
 			setControllerState(i, eControllerStatus_PlayerDetails);
-			m_labelDisplayName[i].init(ProfileManager.GetDisplayName(i));
+			m_labelDisplayName[i].init(GameGetLocalDisplayName(i));
 		}
 		else if(InputManager.IsPadConnected(i))
 		{
@@ -220,7 +221,7 @@ void UIScene_QuadrantSignin::updateState()
 			//app.DebugPrintf("Index %d is signed in, display name - '%s'\n", i, ProfileManager.GetDisplayName(i).data());
 
 			setControllerState(i, eControllerStatus_PlayerDetails);
-			m_labelDisplayName[i].setLabel(ProfileManager.GetDisplayName(i));
+			m_labelDisplayName[i].setLabel(GameGetLocalDisplayName(i));
 			//m_buttonControllers[i].setLabel(app.GetString(IDS_TOOLTIPS_CONTINUE),i);
 
 			if(!m_iconRequested[i])

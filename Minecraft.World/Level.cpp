@@ -4051,12 +4051,65 @@ Path *Level::findPath(shared_ptr<Entity> from, int xBest, int yBest, int zBest, 
 	return path;
 }
 
+namespace
+{
+Tile *resolveSignalTile(int tileId)
+{
+	switch (tileId)
+	{
+	case Tile::detectorRail_Id:
+		return Tile::detectorRail;
+	case Tile::redStoneDust_Id:
+		return Tile::redStoneDust;
+	case Tile::lever_Id:
+		return Tile::lever;
+	case Tile::pressurePlate_stone_Id:
+		return Tile::pressurePlate_stone;
+	case Tile::pressurePlate_wood_Id:
+		return Tile::pressurePlate_wood;
+	case Tile::notGate_off_Id:
+		return Tile::notGate_off;
+	case Tile::notGate_on_Id:
+		return Tile::notGate_on;
+	case Tile::button_stone_Id:
+		return Tile::button;
+	case Tile::diode_off_Id:
+		return (Tile *)Tile::diode_off;
+	case Tile::diode_on_Id:
+		return (Tile *)Tile::diode_on;
+	case Tile::tripWireSource_Id:
+		return Tile::tripWireSource;
+	case Tile::button_wood_Id:
+		return Tile::button_wood;
+	default:
+		break;
+	}
+
+	if ((unsigned int)tileId >= Tile::TILE_NUM_COUNT)
+	{
+		return NULL;
+	}
+
+	return Tile::tiles[tileId];
+}
+
+void logInvalidSignalTile(const char *caller, int tileId, int x, int y, int z)
+{
+	app.DebugPrintf("%s invalid signal tile id=%d at %d,%d,%d\n", caller, tileId, x, y, z);
+}
+}
 
 bool Level::getDirectSignal(int x, int y, int z, int dir)
 {
 	int t = getTile(x, y, z);
 	if (t == 0) return false;
-	return Tile::tiles[t]->getDirectSignal(this, x, y, z, dir);
+	Tile *tile = resolveSignalTile(t);
+	if (tile == NULL)
+	{
+		logInvalidSignalTile("Level::getDirectSignal", t, x, y, z);
+		return false;
+	}
+	return tile->getDirectSignal(this, x, y, z, dir);
 }
 
 
@@ -4080,7 +4133,13 @@ bool Level::getSignal(int x, int y, int z, int dir)
 	}
 	int t = getTile(x, y, z);
 	if (t == 0) return false;
-	return Tile::tiles[t]->getSignal(this, x, y, z, dir);
+	Tile *tile = resolveSignalTile(t);
+	if (tile == NULL)
+	{
+		logInvalidSignalTile("Level::getSignal", t, x, y, z);
+		return false;
+	}
+	return tile->getSignal(this, x, y, z, dir);
 }
 
 
@@ -4212,7 +4271,7 @@ shared_ptr<Player> Level::getPlayerByUUID(const wstring& name)
 	AUTO_VAR(itEnd, players.end());
 	for (AUTO_VAR(it, players.begin()); it != itEnd; it++)
 	{
-		if (name.compare( (*it)->getUUID() ) == 0)
+		if ((*it)->matchesSavedOwnerIdentity(name))
 		{
 			return *it; //players.at(i);
 		}
