@@ -110,6 +110,143 @@ namespace
 		return attributes != (DWORD)-1 && (attributes & FILE_ATTRIBUTE_DIRECTORY) == FILE_ATTRIBUTE_DIRECTORY;
 	}
 
+	static bool OrbisHasPckExtension(const wstring &filename)
+	{
+		if(filename.length() < 4)
+		{
+			return false;
+		}
+
+		return _wcsicmp(filename.c_str() + filename.length() - 4, L".pck") == 0;
+	}
+
+	static DLCPack *OrbisFindPackByPackId(DLCManager &manager, DWORD packId)
+	{
+		if(packId == 0)
+		{
+			return NULL;
+		}
+
+		DWORD packCount = manager.getPackCount(DLCManager::e_DLCType_All);
+		for(DWORD i = 0; i < packCount; ++i)
+		{
+			DLCPack *pack = manager.getPack(i, DLCManager::e_DLCType_All);
+			if(pack != NULL && pack->GetPackId() == packId)
+			{
+				return pack;
+			}
+		}
+
+		return NULL;
+	}
+
+	static void OrbisDeleteFileList(vector<File *> *files)
+	{
+		if(files == NULL)
+		{
+			return;
+		}
+
+		for(AUTO_VAR(it, files->begin()); it != files->end(); ++it)
+		{
+			delete *it;
+		}
+
+		delete files;
+	}
+
+	static void OrbisLoadPackagedDLCPack(CMinecraftApp &app, const wstring &packPath, const wstring &rootPath)
+	{
+		static const DWORD ORBIS_PACKAGED_DLC_LICENSE_MASK = 0xFFFFFFFF;
+
+		File packFile(packPath);
+		DLCPack *probePack = new DLCPack(packFile.getName(), ORBIS_PACKAGED_DLC_LICENSE_MASK);
+		DWORD packId = app.m_dlcManager.retrievePackIDFromDLCDataFile(wstringtofilename(packPath), probePack);
+		probePack->SetDataPointer(NULL);
+
+		DLCPack *existingPack = OrbisFindPackByPackId(app.m_dlcManager, packId);
+		if(existingPack != NULL)
+		{
+			if(existingPack->IsCorrupt())
+			{
+				app.DebugPrintf("Pack '%ls' is corrupt, removing it from the DLC Manager.\n", existingPack->getName().c_str());
+				app.m_dlcManager.removePack(existingPack);
+			}
+			else
+			{
+				delete probePack;
+				return;
+			}
+		}
+
+		delete probePack;
+
+		DLCPack *pack = new DLCPack(packFile.getName(), ORBIS_PACKAGED_DLC_LICENSE_MASK);
+		pack->SetRootPath(rootPath);
+
+		DWORD dwFilesProcessed = 0;
+		if(!app.m_dlcManager.readDLCDataFile(dwFilesProcessed, packPath, pack) || dwFilesProcessed == 0)
+		{
+			return;
+		}
+
+		app.m_dlcManager.addPack(pack);
+		app.DebugPrintf("Loaded packaged DLC '%ls' from %ls\n", pack->getName().c_str(), packPath.c_str());
+
+		if(pack->getDLCItemsCount(DLCManager::e_DLCType_Texture) > 0)
+		{
+			Minecraft::GetInstance()->skins->addTexturePackFromDLC(pack, pack->GetPackId());
+		}
+	}
+
+	static void OrbisLoadPackagedDLC(CMinecraftApp &app)
+	{
+		File dlcRoot(L"DLC");
+		if(!dlcRoot.exists() || !dlcRoot.isDirectory())
+		{
+			app.DebugPrintf("Packaged DLC directory not found\n");
+			return;
+		}
+
+		vector<File *> *entries = dlcRoot.listFiles();
+		if(entries == NULL)
+		{
+			return;
+		}
+
+		for(AUTO_VAR(it, entries->begin()); it != entries->end(); ++it)
+		{
+			File *entry = *it;
+			if(entry == NULL)
+			{
+				continue;
+			}
+
+			if(entry->isDirectory())
+			{
+				vector<File *> *packFiles = entry->listFiles();
+				if(packFiles != NULL)
+				{
+					for(AUTO_VAR(fileIt, packFiles->begin()); fileIt != packFiles->end(); ++fileIt)
+					{
+						File *packFile = *fileIt;
+						if(packFile != NULL && packFile->isFile() && OrbisHasPckExtension(packFile->getName()))
+						{
+							OrbisLoadPackagedDLCPack(app, packFile->getPath(), entry->getPath());
+						}
+					}
+				}
+				OrbisDeleteFileList(packFiles);
+			}
+			else if(entry->isFile() && OrbisHasPckExtension(entry->getName()))
+			{
+				OrbisLoadPackagedDLCPack(app, entry->getPath(), dlcRoot.getPath());
+			}
+		}
+
+		OrbisDeleteFileList(entries);
+	}
+
 	static bool OrbisReadTextFile(const char *path, string &contents)
 	{
 		HANDLE hFile = CreateFile(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
@@ -5523,6 +5660,10 @@ void CMinecraftApp::MountNextDLC(int iPad)
 	}
 	else
 	{
+#ifdef __ORBIS__
+		OrbisLoadPackagedDLC(app);
+#endif
+
 		/* Removed - now loading these on demand instead of as each pack is mounted
 		if(m_iTotalDLCInstalled > 0)
 		{

@@ -14,6 +14,7 @@
 DLCPack::DLCPack(const wstring &name,DWORD dwLicenseMask)
 {
 	m_dataPath = L"";
+	m_rootPath = L"";
 	m_packName = name;
 	m_dwLicenseMask=dwLicenseMask;
 #ifdef _XBOX_ONE
@@ -38,6 +39,7 @@ DLCPack::DLCPack(const wstring &name,DWORD dwLicenseMask)
 DLCPack::DLCPack(const wstring &name,const wstring &productID,DWORD dwLicenseMask)
 {
 	m_dataPath = L"";
+	m_rootPath = L"";
 	m_packName = name;
 	m_dwLicenseMask=dwLicenseMask;
 	m_wsProductId = productID;
@@ -99,6 +101,19 @@ XCONTENTDEVICEID DLCPack::GetDLCDeviceID()
 	return m_dlcDeviceID;
 }
 
+wstring DLCPack::GetPackRootPath() const
+{
+	if(!m_rootPath.empty())
+	{
+		return m_rootPath;
+	}
+	if(m_parentPack != NULL)
+	{
+		return m_parentPack->GetPackRootPath();
+	}
+	return L"";
+}
+
 void DLCPack::addChildPack(DLCPack *childPack)
 {
 	int packId = childPack->GetPackId();
@@ -109,6 +124,7 @@ void DLCPack::addChildPack(DLCPack *childPack)
 	}
 #endif
 	childPack->SetPackId( (packId<<24) | m_packId );
+	childPack->m_rootPath = m_rootPath;
 	m_childPacks.push_back(childPack);
 	childPack->setParentPack(this);
 	childPack->m_packName = m_packName + childPack->getName();

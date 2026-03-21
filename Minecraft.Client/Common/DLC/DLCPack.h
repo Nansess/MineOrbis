@@ -16,6 +16,7 @@ private:
 
 	wstring m_packName;
 	wstring m_dataPath;
+	wstring m_rootPath;
 	DWORD m_dwLicenseMask;
 	int m_dlcMountIndex;
 	XCONTENTDEVICEID m_dlcDeviceID;
@@ -66,6 +67,8 @@ public:
 
 	void updateLicenseMask( DWORD dwLicenseMask ) { m_dwLicenseMask = dwLicenseMask; }
 	DWORD getLicenseMask( ) { return m_dwLicenseMask; }
+	void SetRootPath(const wstring &path) { m_rootPath = path; }
+	wstring GetPackRootPath() const;
 	
 	wstring getName() { return m_packName; }
 #ifdef _XBOX_ONE

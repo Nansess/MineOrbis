@@ -255,6 +255,13 @@ void DLCTexturePack::loadData()
 			app.DebugPrintf("Attempted to mount DLC data for texture pack %d\n", mountIndex);
 		}
 	}
+	else if(!m_dlcInfoPack->GetPackRootPath().empty())
+	{
+		m_bLoadingData = true;
+		app.DebugPrintf("Loading packaged DLC data for texture pack %d\n", m_dlcInfoPack->GetPackID());
+		loadDataPack(m_dlcInfoPack->getLicenseMask());
+		completeDataLoad();
+	}
 	else
 	{
 		m_bHasLoadedData = true;
@@ -263,177 +270,129 @@ void DLCTexturePack::loadData()
 	}
 }
 
-
-
-
-
 wstring DLCTexturePack::getFilePath(DWORD packId, wstring filename, bool bAddDataFolder)
 {
 	return app.getFilePath(packId,filename,bAddDataFolder);
 }
 
-int DLCTexturePack::packMounted(LPVOID pParam,int iPad,DWORD dwErr,DWORD dwLicenceMask)
+wstring DLCTexturePack::getPackFilePath(const wstring &filename, bool bAddDataFolder) const
 {
-	DLCTexturePack *texturePack = (DLCTexturePack *)pParam;
-	texturePack->m_bLoadingData = false;
-	if(dwErr!=ERROR_SUCCESS)
+	wstring rootPath = m_dlcInfoPack->GetPackRootPath();
+	if(!rootPath.empty())
 	{
-		// corrupt DLC
-		app.DebugPrintf("Failed to mount DLC for pad %d: %d\n",iPad,dwErr);
-	}
-	else
-	{
-		app.DebugPrintf("Mounted DLC for texture pack, attempting to load data\n");
-		texturePack->m_dlcDataPack = new DLCPack(texturePack->m_dlcInfoPack->getName(), dwLicenceMask);
-		texturePack->setHasAudio(false);
-		DWORD dwFilesProcessed = 0;
-		// Load the DLC textures
-		wstring dataFilePath = texturePack->m_dlcInfoPack->getFullDataPath();
-		if(!dataFilePath.empty())
+		File rootFile(rootPath);
+		if(bAddDataFolder)
 		{
-			if(!app.m_dlcManager.readDLCDataFile(dwFilesProcessed, getFilePath(texturePack->m_dlcInfoPack->GetPackID(), dataFilePath),texturePack->m_dlcDataPack))
-			{
-				delete texturePack->m_dlcDataPack;
-				texturePack->m_dlcDataPack = NULL;
-			}
+			File dataFolder(rootFile, L"Data");
+			return File(dataFolder, filename).getPath();
+		}
+		return File(rootFile, filename).getPath();
+	}
 
-			// Load the UI data
-			if(texturePack->m_dlcDataPack != NULL)
-			{
+	return getFilePath(m_dlcInfoPack->GetPackID(), filename, bAddDataFolder);
+}
+
+bool DLCTexturePack::loadDataPack(DWORD dwLicenceMask)
+{
+	m_dlcDataPack = new DLCPack(m_dlcInfoPack->getName(), dwLicenceMask);
+	m_dlcDataPack->SetRootPath(m_dlcInfoPack->GetPackRootPath());
+	setHasAudio(false);
+
+	DWORD dwFilesProcessed = 0;
+	wstring dataFilePath = m_dlcInfoPack->getFullDataPath();
+	if(!dataFilePath.empty())
+	{
+		if(!app.m_dlcManager.readDLCDataFile(dwFilesProcessed, getPackFilePath(dataFilePath), m_dlcDataPack))
+		{
+			delete m_dlcDataPack;
+			m_dlcDataPack = NULL;
+		}
+
+		if(m_dlcDataPack != NULL)
+		{
 #ifdef _XBOX
-				File xzpPath(getFilePath(texturePack->m_dlcInfoPack->GetPackID(), wstring(L"TexturePack.xzp") ) );
+			File xzpPath(getPackFilePath(wstring(L"TexturePack.xzp")));
 
-				if(xzpPath.exists())
+			if(xzpPath.exists())
+			{
+				const char *pchFilename=wstringtofilename(xzpPath.getPath());
+				HANDLE fileHandle = CreateFile(
+					pchFilename,
+					GENERIC_READ,
+					0,
+					NULL,
+					OPEN_EXISTING,
+					FILE_FLAG_SEQUENTIAL_SCAN,
+					NULL
+					);
+
+				if( fileHandle != INVALID_HANDLE_VALUE )
 				{
-					const char *pchFilename=wstringtofilename(xzpPath.getPath());
-					HANDLE fileHandle = CreateFile(
-						pchFilename, // file name
-						GENERIC_READ, // access mode
-						0, // share mode // TODO 4J Stu - Will we need to share file? Probably not but...
-						NULL, // Unused
-						OPEN_EXISTING , // how to create // TODO 4J Stu - Assuming that the file already exists if we are opening to read from it
-						FILE_FLAG_SEQUENTIAL_SCAN, // file attributes
-						NULL // Unsupported
-						);
-
-					if( fileHandle != INVALID_HANDLE_VALUE )
+					DWORD dwFileSize = xzpPath.length();
+					DWORD bytesRead;
+					PBYTE pbData =  (PBYTE) new BYTE[dwFileSize];
+					BOOL success = ReadFile(fileHandle,pbData,dwFileSize,&bytesRead,NULL);
+					CloseHandle(fileHandle);
+					if(success)
 					{
-						DWORD dwFileSize = xzpPath.length();
-						DWORD bytesRead;
-						PBYTE pbData =  (PBYTE) new BYTE[dwFileSize];
-						BOOL success = ReadFile(fileHandle,pbData,dwFileSize,&bytesRead,NULL);
-						CloseHandle(fileHandle);
-						if(success)
-						{
-							DLCUIDataFile *uiDLCFile = (DLCUIDataFile *)texturePack->m_dlcDataPack->addFile(DLCManager::e_DLCType_UIData,L"TexturePack.xzp");
-							uiDLCFile->addData(pbData,bytesRead,true);
-						
-						}
+						DLCUIDataFile *uiDLCFile = (DLCUIDataFile *)m_dlcDataPack->addFile(DLCManager::e_DLCType_UIData,L"TexturePack.xzp");
+						uiDLCFile->addData(pbData,bytesRead,true);
 					}
 				}
+			}
 #else
-				File archivePath(getFilePath(texturePack->m_dlcInfoPack->GetPackID(), wstring(L"media.arc") ) );
-				if(archivePath.exists()) texturePack->m_archiveFile = new ArchiveFile(archivePath);
+			File archivePath(getPackFilePath(wstring(L"media.arc")));
+			if(archivePath.exists()) m_archiveFile = new ArchiveFile(archivePath);
 #endif
 
-				/**
-					4J-JEV:
-						For all the GameRuleHeader files we find
-				*/
-				DLCPack *pack = texturePack->m_dlcInfoPack->GetParentPack();
-				LevelGenerationOptions *levelGen = app.getLevelGenerationOptions();
-				if (levelGen != NULL && !levelGen->hasLoadedData())
+			DLCPack *pack = m_dlcInfoPack->GetParentPack();
+			if(pack == NULL)
+			{
+				pack = m_dlcInfoPack;
+			}
+
+			LevelGenerationOptions *levelGen = app.getLevelGenerationOptions();
+			if (levelGen != NULL && !levelGen->hasLoadedData())
+			{
+				int gameRulesCount = pack->getDLCItemsCount(DLCManager::e_DLCType_GameRulesHeader);
+				for(int i = 0; i < gameRulesCount; ++i)
 				{
-					int gameRulesCount = pack->getDLCItemsCount(DLCManager::e_DLCType_GameRulesHeader);
-					for(int i = 0; i < gameRulesCount; ++i)
+					DLCGameRulesHeader *dlcFile = (DLCGameRulesHeader *) pack->getFile(DLCManager::e_DLCType_GameRulesHeader, i);
+				
+					if (!dlcFile->getGrfPath().empty())
 					{
-						DLCGameRulesHeader *dlcFile = (DLCGameRulesHeader *) pack->getFile(DLCManager::e_DLCType_GameRulesHeader, i);
-					
-						if (!dlcFile->getGrfPath().empty())
-						{
-							File grf( getFilePath(texturePack->m_dlcInfoPack->GetPackID(), dlcFile->getGrfPath() ) );
-							if (grf.exists())
-							{
-#ifdef _UNICODE
-								wstring path = grf.getPath();
-								const WCHAR *pchFilename=path.c_str();
-								HANDLE fileHandle = CreateFile(
-									pchFilename, // file name
-									GENERIC_READ, // access mode
-									0, // share mode // TODO 4J Stu - Will we need to share file? Probably not but...
-									NULL, // Unused
-									OPEN_EXISTING , // how to create // TODO 4J Stu - Assuming that the file already exists if we are opening to read from it
-									FILE_FLAG_SEQUENTIAL_SCAN, // file attributes
-									NULL // Unsupported
-									);
-#else
-								const char *pchFilename=wstringtofilename(grf.getPath());
-								HANDLE fileHandle = CreateFile(
-									pchFilename, // file name
-									GENERIC_READ, // access mode
-									0, // share mode // TODO 4J Stu - Will we need to share file? Probably not but...
-									NULL, // Unused
-									OPEN_EXISTING , // how to create // TODO 4J Stu - Assuming that the file already exists if we are opening to read from it
-									FILE_FLAG_SEQUENTIAL_SCAN, // file attributes
-									NULL // Unsupported
-									);
-#endif
-
-								if( fileHandle != INVALID_HANDLE_VALUE )
-								{
-									DWORD dwFileSize = grf.length();
-									DWORD bytesRead;
-									PBYTE pbData =  (PBYTE) new BYTE[dwFileSize];
-									BOOL bSuccess = ReadFile(fileHandle,pbData,dwFileSize,&bytesRead,NULL);
-									if(bSuccess==FALSE)
-									{
-										app.FatalLoadError();
-									}
-									CloseHandle(fileHandle);
-
-									// 4J-PB - is it possible that we can get here after a read fail and it's not an error?
-									dlcFile->setGrfData(pbData, dwFileSize, texturePack->m_stringTable);
-
-									delete [] pbData;
-
-									app.m_gameRules.setLevelGenerationOptions( dlcFile->lgo );
-								}
-							}
-						}
-					}
-					if(levelGen->requiresBaseSave() && !levelGen->getBaseSavePath().empty() )
-					{
-						File grf(getFilePath(texturePack->m_dlcInfoPack->GetPackID(), levelGen->getBaseSavePath() ));
+						File grf(getPackFilePath(dlcFile->getGrfPath()));
 						if (grf.exists())
 						{
-#ifdef _UNICODE
+	#ifdef _UNICODE
 							wstring path = grf.getPath();
 							const WCHAR *pchFilename=path.c_str();
 							HANDLE fileHandle = CreateFile(
-								pchFilename, // file name
-								GENERIC_READ, // access mode
-								0, // share mode // TODO 4J Stu - Will we need to share file? Probably not but...
-								NULL, // Unused
-								OPEN_EXISTING , // how to create // TODO 4J Stu - Assuming that the file already exists if we are opening to read from it
-								FILE_FLAG_SEQUENTIAL_SCAN, // file attributes
-								NULL // Unsupported
+								pchFilename,
+								GENERIC_READ,
+								0,
+								NULL,
+								OPEN_EXISTING,
+								FILE_FLAG_SEQUENTIAL_SCAN,
+								NULL
 								);
-#else
+	#else
 							const char *pchFilename=wstringtofilename(grf.getPath());
 							HANDLE fileHandle = CreateFile(
-								pchFilename, // file name
-								GENERIC_READ, // access mode
-								0, // share mode // TODO 4J Stu - Will we need to share file? Probably not but...
-								NULL, // Unused
-								OPEN_EXISTING , // how to create // TODO 4J Stu - Assuming that the file already exists if we are opening to read from it
-								FILE_FLAG_SEQUENTIAL_SCAN, // file attributes
-								NULL // Unsupported
+								pchFilename,
+								GENERIC_READ,
+								0,
+								NULL,
+								OPEN_EXISTING,
+								FILE_FLAG_SEQUENTIAL_SCAN,
+								NULL
 								);
-#endif
+	#endif
 
 							if( fileHandle != INVALID_HANDLE_VALUE )
 							{
-								DWORD bytesRead,dwFileSize = GetFileSize(fileHandle,NULL);
+								DWORD dwFileSize = grf.length();
+								DWORD bytesRead;
 								PBYTE pbData =  (PBYTE) new BYTE[dwFileSize];
 								BOOL bSuccess = ReadFile(fileHandle,pbData,dwFileSize,&bytesRead,NULL);
 								if(bSuccess==FALSE)
@@ -442,66 +401,130 @@ int DLCTexturePack::packMounted(LPVOID pParam,int iPad,DWORD dwErr,DWORD dwLicen
 								}
 								CloseHandle(fileHandle);
 
-								// 4J-PB - is it possible that we can get here after a read fail and it's not an error?
-								levelGen->setBaseSaveData(pbData, dwFileSize);
+								dlcFile->setGrfData(pbData, dwFileSize, m_stringTable);
+
+								delete [] pbData;
+
+								app.m_gameRules.setLevelGenerationOptions( dlcFile->lgo );
 							}
 						}
 					}
 				}
-				
+				if(levelGen->requiresBaseSave() && !levelGen->getBaseSavePath().empty() )
+				{
+					File grf(getPackFilePath(levelGen->getBaseSavePath()));
+					if (grf.exists())
+					{
+	#ifdef _UNICODE
+						wstring path = grf.getPath();
+						const WCHAR *pchFilename=path.c_str();
+						HANDLE fileHandle = CreateFile(
+							pchFilename,
+							GENERIC_READ,
+							0,
+							NULL,
+							OPEN_EXISTING,
+							FILE_FLAG_SEQUENTIAL_SCAN,
+							NULL
+							);
+	#else
+						const char *pchFilename=wstringtofilename(grf.getPath());
+						HANDLE fileHandle = CreateFile(
+							pchFilename,
+							GENERIC_READ,
+							0,
+							NULL,
+							OPEN_EXISTING,
+							FILE_FLAG_SEQUENTIAL_SCAN,
+							NULL
+							);
+	#endif
 
-				// any audio data?
+						if( fileHandle != INVALID_HANDLE_VALUE )
+						{
+							DWORD bytesRead,dwFileSize = GetFileSize(fileHandle,NULL);
+							PBYTE pbData =  (PBYTE) new BYTE[dwFileSize];
+							BOOL bSuccess = ReadFile(fileHandle,pbData,dwFileSize,&bytesRead,NULL);
+							if(bSuccess==FALSE)
+							{
+								app.FatalLoadError();
+							}
+							CloseHandle(fileHandle);
+
+							levelGen->setBaseSaveData(pbData, dwFileSize);
+						}
+					}
+				}
+			}
+
 #ifdef _XBOX				
-				File audioXSBPath(getFilePath(texturePack->m_dlcInfoPack->GetPackID(), wstring(L"MashUp.xsb") ) );
-				File audioXWBPath(getFilePath(texturePack->m_dlcInfoPack->GetPackID(), wstring(L"MashUp.xwb") ) );
-				
-				if(audioXSBPath.exists() && audioXWBPath.exists())
-				{
-
-					texturePack->setHasAudio(true);
-					const char *pchXWBFilename=wstringtofilename(audioXWBPath.getPath());
-					Minecraft::GetInstance()->soundEngine->CreateStreamingWavebank(pchXWBFilename,&texturePack->m_pStreamedWaveBank);
-					const char *pchXSBFilename=wstringtofilename(audioXSBPath.getPath());
-					Minecraft::GetInstance()->soundEngine->CreateSoundbank(pchXSBFilename,&texturePack->m_pSoundBank);	
-
-				}
+			File audioXSBPath(getPackFilePath(wstring(L"MashUp.xsb")));
+			File audioXWBPath(getPackFilePath(wstring(L"MashUp.xwb")));
+			
+			if(audioXSBPath.exists() && audioXWBPath.exists())
+			{
+				setHasAudio(true);
+				const char *pchXWBFilename=wstringtofilename(audioXWBPath.getPath());
+				Minecraft::GetInstance()->soundEngine->CreateStreamingWavebank(pchXWBFilename,&m_pStreamedWaveBank);
+				const char *pchXSBFilename=wstringtofilename(audioXSBPath.getPath());
+				Minecraft::GetInstance()->soundEngine->CreateSoundbank(pchXSBFilename,&m_pSoundBank);	
+			}
 #else 
-				//DLCPack *pack = texturePack->m_dlcInfoPack->GetParentPack();
-				if(pack->getDLCItemsCount(DLCManager::e_DLCType_Audio)>0)
-				{
-					DLCAudioFile *dlcFile = (DLCAudioFile *) pack->getFile(DLCManager::e_DLCType_Audio, 0);
-					texturePack->setHasAudio(true);
-					// init the streaming sound ids for this texture pack
-					int iOverworldStart, iNetherStart, iEndStart;
-					int iOverworldC, iNetherC, iEndC;
+			if(pack->getDLCItemsCount(DLCManager::e_DLCType_Audio)>0)
+			{
+				DLCAudioFile *dlcFile = (DLCAudioFile *) pack->getFile(DLCManager::e_DLCType_Audio, 0);
+				setHasAudio(true);
+				int iOverworldStart, iNetherStart, iEndStart;
+				int iOverworldC, iNetherC, iEndC;
 
-					iOverworldStart=0;
-					iOverworldC=dlcFile->GetCountofType(DLCAudioFile::e_AudioType_Overworld);
-					iNetherStart=iOverworldC;
-					iNetherC=dlcFile->GetCountofType(DLCAudioFile::e_AudioType_Nether);
-					iEndStart=iOverworldC+iNetherC;
-					iEndC=dlcFile->GetCountofType(DLCAudioFile::e_AudioType_End);
+				iOverworldStart=0;
+				iOverworldC=dlcFile->GetCountofType(DLCAudioFile::e_AudioType_Overworld);
+				iNetherStart=iOverworldC;
+				iNetherC=dlcFile->GetCountofType(DLCAudioFile::e_AudioType_Nether);
+				iEndStart=iOverworldC+iNetherC;
+				iEndC=dlcFile->GetCountofType(DLCAudioFile::e_AudioType_End);
 
-					Minecraft::GetInstance()->soundEngine->SetStreamingSounds(iOverworldStart,iOverworldStart+iOverworldC,
-						iNetherStart,iNetherStart+iNetherC,iEndStart,iEndStart+iEndC,iEndStart+iEndC); // push the CD start to after
-				}
-#endif
-}
-			texturePack->loadColourTable();
-		}
-
-		// 4J-PB - we need to leave the texture pack mounted if it contained streaming audio
-		if(texturePack->hasAudio()==false)
-		{
-#ifdef _XBOX
-			StorageManager.UnmountInstalledDLC("TPACK");
+				Minecraft::GetInstance()->soundEngine->SetStreamingSounds(iOverworldStart,iOverworldStart+iOverworldC,
+					iNetherStart,iNetherStart+iNetherC,iEndStart,iEndStart+iEndC,iEndStart+iEndC);
+			}
 #endif
 		}
 	}
-	
-	texturePack->m_bHasLoadedData = true;
+
+	loadColourTable();
+
+#ifdef _XBOX
+	if(hasAudio()==false)
+	{
+		StorageManager.UnmountInstalledDLC("TPACK");
+	}
+#endif
+
+	return m_dlcDataPack != NULL;
+}
+
+void DLCTexturePack::completeDataLoad()
+{
+	m_bLoadingData = false;
+	m_bHasLoadedData = true;
 	if (app.getLevelGenerationOptions()) app.getLevelGenerationOptions()->setLoadedData();
 	app.SetAction(ProfileManager.GetPrimaryPad(), eAppAction_ReloadTexturePack);
+}
+
+int DLCTexturePack::packMounted(LPVOID pParam,int iPad,DWORD dwErr,DWORD dwLicenceMask)
+{
+	DLCTexturePack *texturePack = (DLCTexturePack *)pParam;
+	if(dwErr!=ERROR_SUCCESS)
+	{
+		app.DebugPrintf("Failed to mount DLC for pad %d: %d\n",iPad,dwErr);
+	}
+	else
+	{
+		app.DebugPrintf("Mounted DLC for texture pack, attempting to load data\n");
+		texturePack->loadDataPack(dwLicenceMask);
+	}
+
+	texturePack->completeDataLoad();
 
 	return 0;
 }

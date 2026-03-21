@@ -56,6 +56,9 @@ public:
 private:
 	static wstring getRootPath(DWORD packId, bool allowOverride, bool bAddDataFolder);
 	static wstring getFilePath(DWORD packId, wstring filename, bool bAddDataFolder=true);
+	wstring getPackFilePath(const wstring &filename, bool bAddDataFolder=true) const;
+	bool loadDataPack(DWORD dwLicenceMask);
+	void completeDataLoad();
 
 public:
 	static int packMounted(LPVOID pParam,int iPad,DWORD dwErr,DWORD dwLicenceMask);
