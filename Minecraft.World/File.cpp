@@ -13,12 +13,7 @@
 #if defined(__ORBIS__) || defined(__PSVITA__)
 static void ResolveWorldFilePath(const char *lpFileName, char *filePath, size_t filePathSize)
 {
-	std::string mountedPath = StorageManager.GetMountedPath(lpFileName);
-	if(mountedPath.length() > 0)
-	{
-		snprintf(filePath, filePathSize, "%s", mountedPath.c_str());
-	}
-	else if(lpFileName[0] == '/')
+	if(lpFileName[0] == '/')
 	{
 		snprintf(filePath, filePathSize, "%s", lpFileName);
 	}
@@ -34,7 +29,15 @@ static void ResolveWorldFilePath(const char *lpFileName, char *filePath, size_t 
 	}
 	else
 	{
-		snprintf(filePath, filePathSize, "%s/%s", getUsrDirPath(), lpFileName);
+		std::string mountedPath = StorageManager.GetMountedPath(lpFileName);
+		if(mountedPath.length() > 0)
+		{
+			snprintf(filePath, filePathSize, "%s", mountedPath.c_str());
+		}
+		else
+		{
+			snprintf(filePath, filePathSize, "%s/%s", getUsrDirPath(), lpFileName);
+		}
 	}
 
 	for(char *p = filePath; *p != 0; ++p)
@@ -199,7 +202,14 @@ bool File::mkdirs() const
 			continue;
 		}
 
-		pathToHere = pathToHere + pathSeparator + *it;
+		if( pathToHere.empty() || pathToHere.compare( pathRoot ) == 0 )
+		{
+			pathToHere = pathToHere + *it;
+		}
+		else
+		{
+			pathToHere = pathToHere + pathSeparator + *it;
+		}
 
 		// if not exists
 #ifdef _UNICODE

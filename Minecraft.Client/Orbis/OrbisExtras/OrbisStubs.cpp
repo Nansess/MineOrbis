@@ -37,12 +37,7 @@ const char* getRawSaveDirPath()
 
 static void ResolveOrbisFilePath(const char *lpFileName, char *filePath, size_t filePathSize)
 {
-	std::string mountedPath = StorageManager.GetMountedPath(lpFileName);
-	if(mountedPath.length() > 0)
-	{
-		snprintf(filePath, filePathSize, "%s", mountedPath.c_str());
-	}
-	else if(lpFileName[0] == '/')
+	if(lpFileName[0] == '/')
 	{
 		snprintf(filePath, filePathSize, "%s", lpFileName);
 	}
@@ -52,7 +47,15 @@ static void ResolveOrbisFilePath(const char *lpFileName, char *filePath, size_t 
 	}
 	else
 	{
-		snprintf(filePath, filePathSize, "%s/%s", getUsrDirPath(), lpFileName);
+		std::string mountedPath = StorageManager.GetMountedPath(lpFileName);
+		if(mountedPath.length() > 0)
+		{
+			snprintf(filePath, filePathSize, "%s", mountedPath.c_str());
+		}
+		else
+		{
+			snprintf(filePath, filePathSize, "%s/%s", getUsrDirPath(), lpFileName);
+		}
 	}
 
 	for(char *p = filePath; *p != 0; ++p)
@@ -247,6 +250,9 @@ VOID OrbisInit()
 
 	int err = sceFiosInitialize(&fiosParams);
 	assert(err == SCE_FIOS_OK);
+
+	OrbisEnsureDirectoryExists("/data/minecraft");
+	OrbisEnsureDirectoryExists("Saves");
 
 	scePthreadMutexattrInit(&mutexParams);
 	scePthreadMutexattrSettype(&mutexParams, SCE_PTHREAD_MUTEX_ADAPTIVE);

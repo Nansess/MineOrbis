@@ -78,6 +78,11 @@ private:
 	wstring GetNameFromNumericIdentifier(unsigned int idIn);
 	void processSubfilesForWrite();
 	void processSubfilesAfterWrite();
+#ifdef __ORBIS__
+	bool loadOrbisSubfiles();
+	bool writeOrbisSubfile(RegionFileReference *region);
+	wstring getOrbisSubfileDirectory() const;
+#endif
 public:
 	static int SaveSaveDataCallback(LPVOID lpParam,bool bRes);
 	static int SaveRegionFilesCallback(LPVOID lpParam,bool bRes);

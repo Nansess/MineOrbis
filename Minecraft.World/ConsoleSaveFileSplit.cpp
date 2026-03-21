@@ -19,6 +19,32 @@
 unsigned int ConsoleSaveFileSplit::pagesCommitted = 0;
 void *ConsoleSaveFileSplit::pvHeap = NULL;
 
+#ifdef __ORBIS__
+static std::string GetOrbisSplitSaveFilename(const std::wstring &fileName)
+{
+	std::string saveName = wstringtofilename(fileName);
+	if(saveName.empty())
+	{
+		return saveName;
+	}
+	if(saveName.rfind(".mcs") == std::string::npos)
+	{
+		saveName.append(".mcs");
+	}
+	return saveName;
+}
+
+static std::string GetOrbisSplitSaveRelativePath(const std::wstring &fileName)
+{
+	std::string saveName = GetOrbisSplitSaveFilename(fileName);
+	if(saveName.empty())
+	{
+		return saveName;
+	}
+	return std::string("Saves\\").append(saveName);
+}
+#endif
+
 ConsoleSaveFileSplit::RegionFileReference::RegionFileReference(int index, unsigned int regionIndex,  unsigned int length/*=0*/, unsigned char *data/*=NULL*/)
 {
 	fileEntry = new FileEntry();
@@ -393,7 +419,32 @@ ConsoleSaveFileSplit::ConsoleSaveFileSplit(const wstring &fileName, LPVOID pvSav
 	}
 
 	if( pvSaveData == NULL || fileSize == 0)
+#ifdef __ORBIS__
+	{
+		std::string savePath = GetOrbisSplitSaveRelativePath(fileName);
+		if(!savePath.empty())
+		{
+			HANDLE hSaveFile = CreateFile(savePath.c_str(), GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_FLAG_RANDOM_ACCESS, NULL);
+			if(hSaveFile != INVALID_HANDLE_VALUE)
+			{
+				DWORD localFileSize = GetFileSize(hSaveFile, NULL);
+				if(localFileSize > 0)
+				{
+					pvSaveData = malloc(localFileSize);
+					if(pvSaveData != NULL)
+					{
+						DWORD bytesRead = 0;
+						ReadFile(hSaveFile, pvSaveData, localFileSize, &bytesRead, NULL);
+						fileSize = bytesRead;
+					}
+				}
+				CloseHandle(hSaveFile);
+			}
+		}
+	}
+#else
 		fileSize = StorageManager.GetSaveSize();
+#endif
 
 	if( forceCleanSave )
 		fileSize = 0;
@@ -456,6 +507,9 @@ void ConsoleSaveFileSplit::_init(const wstring &fileName, LPVOID pvSaveData, DWO
 	m_fileName = fileName;
 
 	// Get details of region files. From this point on we are responsible for the memory that the storage manager initially allocated for them
+#ifdef __ORBIS__
+	loadOrbisSubfiles();
+#else
 	unsigned int regionCount = StorageManager.GetSubfileCount();
 	for( unsigned int i = 0; i < regionCount; i++ )
 	{
@@ -477,6 +531,7 @@ void ConsoleSaveFileSplit::_init(const wstring &fileName, LPVOID pvSaveData, DWO
 		regionFileRef->ReleaseCompressed();
 		regionFiles[regionIndex] = regionFileRef;
 	}
+#endif
 
 	DWORD heapSize = max( fileSize, (DWORD)(1024 * 1024 * 2)); // 4J Stu - Our files are going to be bigger than 2MB so allocate high to start with
 
@@ -506,6 +561,9 @@ void ConsoleSaveFileSplit::_init(const wstring &fileName, LPVOID pvSaveData, DWO
 		if(pvSaveData != NULL)
 		{
 			memcpy(pvSaveMem, pvSaveData, fileSize);
+#ifdef __ORBIS__
+			free(pvSaveData);
+#endif
 		}
 		else
 		{
@@ -989,7 +1047,11 @@ void ConsoleSaveFileSplit::tick()
 
 		regionRef->Compress();
 //		app.DebugPrintf("Tick: Writing region 0x%.8x, compressed as %d bytes\n",regionRef->fileEntry->getRegionFileIndex(), regionRef->dataCompressedSize);
+#ifdef __ORBIS__
+		writeOrbisSubfile(regionRef);
+#else
 		StorageManager.UpdateSubfile(regionRef->index, regionRef->dataCompressed, regionRef->dataCompressedSize);
+#endif
 		regionRef->dirty = false;
 		regionRef->lastWritten = System::currentTimeMillis();
 
@@ -1023,7 +1085,11 @@ void ConsoleSaveFileSplit::tick()
 
 	if( writeRequired )
 	{
+#ifdef __ORBIS__
+		processSubfilesAfterWrite();
+#else
 		StorageManager.SaveSubfiles(SaveRegionFilesCallback, this);
+#endif
 	}
 
 	ReleaseSaveAccess();
@@ -1279,7 +1345,11 @@ void ConsoleSaveFileSplit::processSubfilesForWrite()
 		if( region->dirty )
 		{
 			region->Compress();
+#ifdef __ORBIS__
+			writeOrbisSubfile(region);
+#else
 			StorageManager.UpdateSubfile(region->index, region->dataCompressed, region->dataCompressedSize);
+#endif
 			region->dirty = false;
 			region->lastWritten = System::currentTimeMillis();
 		}
@@ -1352,7 +1422,11 @@ void ConsoleSaveFileSplit::Flush(bool autosave, bool updateThumbnail)
 
 	// Attempt to allocate the required memory
 	// We do not own this, it belongs to the StorageManager
+#ifdef __ORBIS__
+	byte *compData = (byte *)malloc(compLength);
+#else
 	byte *compData = (byte *)StorageManager.AllocateSaveData( compLength );
+#endif
 
 	// If we failed to allocate then compData will be NULL
 	// Pre-calculate the compressed data size so that we can attempt to allocate a smaller buffer
@@ -1379,7 +1453,11 @@ void ConsoleSaveFileSplit::Flush(bool autosave, bool updateThumbnail)
 		compLength = compLength+8;
 
 		// Attempt to allocate the required memory
+#ifdef __ORBIS__
+		compData = (byte *)malloc(compLength);
+#else
 		compData = (byte *)StorageManager.AllocateSaveData( compLength );
+#endif
 	}
 	
 	if(compData != NULL)
@@ -1432,17 +1510,52 @@ void ConsoleSaveFileSplit::Flush(bool autosave, bool updateThumbnail)
 			int iTextMetadataBytes = app.CreateImageTextData(bTextMetadata, seed, hasSeed, app.GetGameHostOption(eGameHostOption_All), Minecraft::GetInstance()->getCurrentTexturePackId());
 
 			// set the icon and save image
+#ifndef __ORBIS__
 			StorageManager.SetSaveImages(pbThumbnailData,dwThumbnailDataSize,pbDataSaveImage,dwDataSizeSaveImage,bTextMetadata,iTextMetadataBytes);
+#endif
 			app.DebugPrintf("Save thumbnail size %d\n",dwThumbnailDataSize);
 
 		}
 		
 		INT saveOrCheckpointId = 0;
+#ifndef __ORBIS__
 		bool validSave = StorageManager.GetSaveUniqueNumber(&saveOrCheckpointId);
+#endif
 		TelemetryManager->RecordLevelSaveOrCheckpoint(ProfileManager.GetPrimaryPad(), saveOrCheckpointId, compLength+8);
 
 		// save the data
+#ifdef __ORBIS__
+		if(m_fileName.empty())
+		{
+			SYSTEMTIME t;
+			GetSystemTime(&t);
+			wchar_t generatedName[64];
+			swprintf(generatedName, 64, L"save-%04d%02d%02d-%02d%02d%02d",
+				t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+			m_fileName = generatedName;
+		}
+
+		std::string savePath = GetOrbisSplitSaveRelativePath(m_fileName);
+		if(!savePath.empty() && OrbisEnsureDirectoryExists("Saves"))
+		{
+			DeleteFile(savePath.c_str());
+			HANDLE hSaveFile = CreateFile(savePath.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_FLAG_RANDOM_ACCESS, NULL);
+			if(hSaveFile != INVALID_HANDLE_VALUE)
+			{
+				DWORD numberOfBytesWritten = 0;
+				WriteFile(hSaveFile, compData, compLength + 8, &numberOfBytesWritten, NULL);
+				CloseHandle(hSaveFile);
+			}
+		}
+		if(!m_autosave)
+		{
+			processSubfilesForWrite();
+			processSubfilesAfterWrite();
+		}
+		free(compData);
+#else
 		StorageManager.SaveSaveData( &ConsoleSaveFileSplit::SaveSaveDataCallback, this );
+#endif
 #ifndef _CONTENT_PACKAGE
 		if( app.DebugSettingsOn())
 		{
@@ -1468,6 +1581,127 @@ int ConsoleSaveFileSplit::SaveSaveDataCallback(LPVOID lpParam,bool bRes)
 	}
 	return 0;
 }
+
+#ifdef __ORBIS__
+wstring ConsoleSaveFileSplit::getOrbisSubfileDirectory() const
+{
+	std::string saveName = GetOrbisSplitSaveFilename(m_fileName);
+	if(saveName.empty())
+	{
+		return L"";
+	}
+
+	std::string subfileDir = std::string("Saves\\").append(saveName).append(".parts");
+	return filenametowstring(subfileDir.c_str());
+}
+
+bool ConsoleSaveFileSplit::loadOrbisSubfiles()
+{
+	wstring subfileDirPath = getOrbisSubfileDirectory();
+	if(subfileDirPath.empty())
+	{
+		return false;
+	}
+
+	File subfileDir(subfileDirPath);
+	if(!subfileDir.exists() || !subfileDir.isDirectory())
+	{
+		return false;
+	}
+
+	vector<File *> *files = subfileDir.listFiles();
+	if(files == NULL)
+	{
+		return false;
+	}
+
+	for(AUTO_VAR(it, files->begin()); it != files->end(); ++it)
+	{
+		File *subfile = *it;
+		if(subfile == NULL || !subfile->isFile())
+		{
+			continue;
+		}
+
+		unsigned int regionIndex = 0;
+		if(!GetNumericIdentifierFromName(subfile->getName(), &regionIndex))
+		{
+			continue;
+		}
+
+		DWORD compressedSize = (DWORD)subfile->length();
+		unsigned char *compressedData = NULL;
+		if(compressedSize > 0)
+		{
+			HANDLE hSubfile = CreateFile(wstringtofilename(subfile->getPath()), GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_FLAG_RANDOM_ACCESS, NULL);
+			if(hSubfile == INVALID_HANDLE_VALUE)
+			{
+				continue;
+			}
+
+			compressedData = (unsigned char *)malloc(compressedSize);
+			if(compressedData == NULL)
+			{
+				CloseHandle(hSubfile);
+				continue;
+			}
+
+			DWORD bytesRead = 0;
+			ReadFile(hSubfile, compressedData, compressedSize, &bytesRead, NULL);
+			CloseHandle(hSubfile);
+			compressedSize = bytesRead;
+		}
+
+		RegionFileReference *regionFileRef = new RegionFileReference(-1, regionIndex, compressedSize, compressedData);
+		if(compressedSize > 0)
+		{
+			regionFileRef->Decompress();
+		}
+		else
+		{
+			regionFileRef->fileEntry->data.length = 0;
+		}
+		regionFileRef->ReleaseCompressed();
+		regionFiles[regionIndex] = regionFileRef;
+	}
+
+	delete files;
+	return true;
+}
+
+bool ConsoleSaveFileSplit::writeOrbisSubfile(RegionFileReference *region)
+{
+	if(region == NULL)
+	{
+		return false;
+	}
+
+	wstring subfileDirPath = getOrbisSubfileDirectory();
+	if(subfileDirPath.empty())
+	{
+		return false;
+	}
+
+	File subfileDir(subfileDirPath);
+	if(!subfileDir.exists() && !subfileDir.mkdirs())
+	{
+		return false;
+	}
+
+	File subfile(subfileDir, GetNameFromNumericIdentifier(region->fileEntry->data.regionIndex));
+	HANDLE hSubfile = CreateFile(wstringtofilename(subfile.getPath()), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_FLAG_RANDOM_ACCESS, NULL);
+	if(hSubfile == INVALID_HANDLE_VALUE)
+	{
+		return false;
+	}
+
+	DWORD bytesWritten = 0;
+	BOOL result = WriteFile(hSubfile, region->dataCompressed, region->dataCompressedSize, &bytesWritten, NULL);
+	CloseHandle(hSubfile);
+
+	return result != 0 && bytesWritten == region->dataCompressedSize;
+}
+#endif
 
 int ConsoleSaveFileSplit::SaveRegionFilesCallback(LPVOID lpParam,bool bRes)
 {

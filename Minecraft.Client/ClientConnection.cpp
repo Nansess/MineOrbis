@@ -2994,7 +2994,14 @@ void ClientConnection::handlePlayerInfo(shared_ptr<PlayerInfoPacket> packet)
 	if(entity != NULL && entity->GetType() == eTYPE_PLAYER)
 	{
 		shared_ptr<Player> player = dynamic_pointer_cast<Player>(entity);
-		player->setPlayerGamePrivilege(Player::ePlayerGamePrivilege_All, packet->m_playerPrivileges);
+		if(player != NULL)
+		{
+			player->setPlayerGamePrivilege(Player::ePlayerGamePrivilege_All, packet->m_playerPrivileges);
+		}
+		else
+		{
+			app.DebugPrintf("ClientConnection::handlePlayerInfo - entity %d reported as player but cast failed\n", packet->m_entityId);
+		}
 	}
 	if(networkPlayer != NULL && networkPlayer->IsLocal())
 	{
