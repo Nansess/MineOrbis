@@ -46,6 +46,50 @@
 DWORD Level::tlsIdx = TlsAlloc();
 DWORD Level::tlsIdxLightCache = TlsAlloc();
 
+static bool LevelHasUsablePlayerPointer(const shared_ptr<Player> &player)
+{
+	Player *rawPlayer = player.get();
+	if (rawPlayer == NULL)
+	{
+		return false;
+	}
+#ifdef __ORBIS__
+	if (reinterpret_cast<size_t>(rawPlayer) < 0x10000)
+	{
+		return false;
+	}
+#endif
+	return true;
+}
+
+static void LevelMarkTileEntityRemoved(Level *level, const shared_ptr<TileEntity> &tileEntity, int x, int y, int z, const char *context)
+{
+	if (tileEntity == NULL)
+	{
+		return;
+	}
+
+	int tileId = level->getTile(x, y, z);
+	if (tileId > 0 && Tile::tiles[tileId] != NULL && Tile::tiles[tileId]->isEntityTile())
+	{
+		tileEntity->setRemoved();
+		return;
+	}
+
+	if (level->isClientSide)
+	{
+		app.DebugPrintf("%s forcing base TileEntity::setRemoved for stale block tile=%d ptr=%p at %d,%d,%d\n",
+			context,
+			tileId,
+			tileEntity.get(),
+			x,
+			y,
+			z);
+	}
+
+	tileEntity->TileEntity::setRemoved();
+}
+
 // 4J : WESTY : Added for time played stats.
 #include "net.minecraft.stats.h"
 
@@ -520,6 +564,7 @@ void Level::_init()
 	isClientSide = false;
 
 	InitializeCriticalSection(&m_entitiesCS);
+	InitializeCriticalSection(&m_playersCS);
 	InitializeCriticalSection(&m_tileEntityListCS);
 
 	m_timeOfDayOverride = -1;
@@ -710,6 +755,7 @@ Level::~Level()
 	if(savedDataStorage!=NULL) delete savedDataStorage;		
 
 	DeleteCriticalSection(&m_entitiesCS);
+	DeleteCriticalSection(&m_playersCS);
 	DeleteCriticalSection(&m_tileEntityListCS);
 
 	// 4J Stu - At least one of the listeners is something we cannot delete, the LevelRenderer
@@ -722,6 +768,30 @@ Level::~Level()
 void Level::initializeLevel(LevelSettings *settings)
 {
 	levelData->setInitialized(true);
+}
+
+void Level::getPlayersSnapshot(vector<shared_ptr<Player> > &playersSnapshot)
+{
+	playersSnapshot.clear();
+
+	EnterCriticalSection(&m_playersCS);
+	vector<shared_ptr<Player> >::iterator it = players.begin();
+	while (it != players.end())
+	{
+		if (!LevelHasUsablePlayerPointer(*it))
+		{
+#ifdef __ORBIS__
+			app.DebugPrintf("Level::getPlayersSnapshot pruning suspicious player entry ptr=%p\n", (*it).get());
+#endif
+			it = players.erase(it);
+		}
+		else
+		{
+			++it;
+		}
+	}
+	playersSnapshot = players;
+	LeaveCriticalSection(&m_playersCS);
 }
 
 void Level::validateSpawn()
@@ -1662,31 +1732,28 @@ bool Level::addGlobalEntity(shared_ptr<Entity> e)
 
 bool Level::addEntity(shared_ptr<Entity> e)
 {
-	int xc = Mth::floor(e->x / 16);
-	int zc = Mth::floor(e->z / 16);
-
 	if(e == NULL)
 	{
 		return false;
 	}
 
-	bool forced = false;
-	if (dynamic_pointer_cast<Player>( e ) != NULL)
-	{
-		forced = true;
-	}
+	int xc = Mth::floor(e->x / 16);
+	int zc = Mth::floor(e->z / 16);
+
+	shared_ptr<Player> player = dynamic_pointer_cast<Player>(e);
+	bool forced = (player != NULL);
 
 	if (forced || hasChunk(xc, zc))
 	{
-		if (dynamic_pointer_cast<Player>( e ) != NULL)
+		if (player != NULL)
 		{
-			shared_ptr<Player> player = dynamic_pointer_cast<Player>(e);
-
 			// 4J Stu - Added so we don't continually add the player to the players list while they are dead
-			if( find( players.begin(), players.end(), e ) == players.end() )
+			EnterCriticalSection(&m_playersCS);
+			if( find( players.begin(), players.end(), player ) == players.end() )
 			{
 				players.push_back(player);
 			}
+			LeaveCriticalSection(&m_playersCS);
 
 			updateSleepingPlayerList();
 		}
@@ -1748,17 +1815,20 @@ void Level::removeEntity(shared_ptr<Entity> e)
 		e->ride(nullptr);
 	}
 	e->remove();
-	if (dynamic_pointer_cast<Player>( e ) != NULL)
+	shared_ptr<Player> player = dynamic_pointer_cast<Player>(e);
+	if (player != NULL)
 	{
+		EnterCriticalSection(&m_playersCS);
 		vector<shared_ptr<Player> >::iterator it = players.begin();
 		vector<shared_ptr<Player> >::iterator itEnd = players.end();
-		while( it != itEnd && *it != dynamic_pointer_cast<Player>(e) )
+		while( it != itEnd && *it != player )
 			it++;
 
 		if( it != itEnd )
 		{
 			players.erase( it );
 		}
+		LeaveCriticalSection(&m_playersCS);
 
 		updateSleepingPlayerList();
 		playerRemoved(e);	// 4J added - this will let the entity tracker know that we have actually removed the player from the level's player list
@@ -1770,17 +1840,20 @@ void Level::removeEntityImmediately(shared_ptr<Entity> e)
 {
 	e->remove();
 
-	if (dynamic_pointer_cast<Player>( e ) != NULL)
+	shared_ptr<Player> player = dynamic_pointer_cast<Player>(e);
+	if (player != NULL)
 	{
+		EnterCriticalSection(&m_playersCS);
 		vector<shared_ptr<Player> >::iterator it = players.begin();
 		vector<shared_ptr<Player> >::iterator itEnd = players.end();
-		while( it != itEnd && *it != dynamic_pointer_cast<Player>(e) )
+		while( it != itEnd && *it != player )
 			it++;
 
 		if( it != itEnd )
 		{
 			players.erase( it );
 		}
+		LeaveCriticalSection(&m_playersCS);
 
 		updateSleepingPlayerList();
 		playerRemoved(e);	// 4J added - this will let the entity tracker know that we have actually removed the player from the level's player list
@@ -2912,7 +2985,7 @@ void Level::removeTileEntity(int x, int y, int z)
     shared_ptr<TileEntity> te = getTileEntity(x, y, z);
     if (te != NULL && updatingTileEntities)
 	{
-        te->setRemoved();
+        LevelMarkTileEntityRemoved(this, te, x, y, z, "Level::removeTileEntity");
 		AUTO_VAR(it, find(pendingTileEntities.begin(), pendingTileEntities.end(), te ));
 		if( it != pendingTileEntities.end() )
 		{
@@ -3182,22 +3255,35 @@ void Level::buildAndPrepareChunksToPoll()
 	// 4J - rewritten to add chunks interleaved by player, and to add them from the centre outwards. We're going to be
 	// potentially adding less creatures than the original so that our count stays consistent with number of players added, so
 	// we want to make sure as best we can that the ones we do add are near the active players
-	int playerCount = (int)players.size();
+	vector<shared_ptr<Player> > playersSnapshot;
+	getPlayersSnapshot(playersSnapshot);
+
+	int playerCount = (int)playersSnapshot.size();
 	int *xx = new int[playerCount];
 	int *zz = new int[playerCount];
+	int validPlayerCount = 0;
 	for (int i = 0; i < playerCount; i++)
 	{
-		shared_ptr<Player> player = players[i];
-		xx[i] = Mth::floor(player->x / 16);
-		zz[i] = Mth::floor(player->z / 16);
-		chunksToPoll.insert(ChunkPos(xx[i], zz[i] ));
+		shared_ptr<Player> player = playersSnapshot[i];
+		if (!LevelHasUsablePlayerPointer(player))
+		{
+#ifdef __ORBIS__
+			app.DebugPrintf("Level::buildAndPrepareChunksToPoll skipping suspicious player entry ptr=%p\n", player.get());
+#endif
+			continue;
+		}
+
+		xx[validPlayerCount] = Mth::floor(player->x / 16);
+		zz[validPlayerCount] = Mth::floor(player->z / 16);
+		chunksToPoll.insert(ChunkPos(xx[validPlayerCount], zz[validPlayerCount]));
+		validPlayerCount++;
 	}
 
 	for( int r = 1; r <= 9; r++ )
 	{
 		for( int l = 0; l < ( r * 2 ) ; l++ )
 		{
-			for( int i = 0; i < playerCount; i++ )
+			for( int i = 0; i < validPlayerCount; i++ )
 			{
 				chunksToPoll.insert(ChunkPos( ( xx[i] - r ) + l , ( zz[i] - r )		) );
 				chunksToPoll.insert(ChunkPos( ( xx[i] + r )		, ( zz[i] - r ) + l ) );
@@ -4166,8 +4252,10 @@ shared_ptr<Player> Level::getNearestPlayer(double x, double y, double z, double 
 	MemSect(21);
 	double best = -1;
 	shared_ptr<Player> result = nullptr;
-	AUTO_VAR(itEnd, players.end());
-	for (AUTO_VAR(it, players.begin()); it != itEnd; it++)
+	vector<shared_ptr<Player> > playersSnapshot;
+	getPlayersSnapshot(playersSnapshot);
+	AUTO_VAR(itEnd, playersSnapshot.end());
+	for (AUTO_VAR(it, playersSnapshot.begin()); it != itEnd; it++)
 	{
 		shared_ptr<Player> p = *it;//players.at(i);
 		double dist = p->distanceToSqr(x, y, z);
@@ -4190,8 +4278,10 @@ shared_ptr<Player> Level::getNearestPlayer(double x, double z, double maxDist)
 {
 	double best = -1;
 	shared_ptr<Player> result = nullptr;
-	AUTO_VAR(itEnd, players.end());
-	for (AUTO_VAR(it, players.begin()); it != itEnd; it++)
+	vector<shared_ptr<Player> > playersSnapshot;
+	getPlayersSnapshot(playersSnapshot);
+	AUTO_VAR(itEnd, playersSnapshot.end());
+	for (AUTO_VAR(it, playersSnapshot.begin()); it != itEnd; it++)
 	{
 		shared_ptr<Player> p = *it;
 		double dist = p->distanceToSqr(x, p->y, z);
@@ -4214,8 +4304,10 @@ shared_ptr<Player> Level::getNearestAttackablePlayer(double x, double y, double 
     double best = -1;
 	
     shared_ptr<Player> result = nullptr;
-	AUTO_VAR(itEnd, players.end());
-	for (AUTO_VAR(it, players.begin()); it != itEnd; it++)
+	vector<shared_ptr<Player> > playersSnapshot;
+	getPlayersSnapshot(playersSnapshot);
+	AUTO_VAR(itEnd, playersSnapshot.end());
+	for (AUTO_VAR(it, playersSnapshot.begin()); it != itEnd; it++)
 	{
 		shared_ptr<Player> p = *it;
 
@@ -4255,8 +4347,10 @@ shared_ptr<Player> Level::getNearestAttackablePlayer(double x, double y, double 
 
 shared_ptr<Player> Level::getPlayerByName(const wstring& name)
 {
-	AUTO_VAR(itEnd, players.end());
-	for (AUTO_VAR(it, players.begin()); it != itEnd; it++)
+	vector<shared_ptr<Player> > playersSnapshot;
+	getPlayersSnapshot(playersSnapshot);
+	AUTO_VAR(itEnd, playersSnapshot.end());
+	for (AUTO_VAR(it, playersSnapshot.begin()); it != itEnd; it++)
 	{
 		if (name.compare( (*it)->name) == 0)
 		{
@@ -4268,8 +4362,10 @@ shared_ptr<Player> Level::getPlayerByName(const wstring& name)
 
 shared_ptr<Player> Level::getPlayerByUUID(const wstring& name)
 {
-	AUTO_VAR(itEnd, players.end());
-	for (AUTO_VAR(it, players.begin()); it != itEnd; it++)
+	vector<shared_ptr<Player> > playersSnapshot;
+	getPlayersSnapshot(playersSnapshot);
+	AUTO_VAR(itEnd, playersSnapshot.end());
+	for (AUTO_VAR(it, playersSnapshot.begin()); it != itEnd; it++)
 	{
 		if ((*it)->matchesSavedOwnerIdentity(name))
 		{
@@ -4441,8 +4537,10 @@ void Level::setTime(__int64 time)
 		// Apply stat to each player.
 		if ( timeDiff > 0 && levelData->getTime() != -1 )
 		{
-			AUTO_VAR(itEnd, players.end());
-			for (vector<shared_ptr<Player> >::iterator it = players.begin(); it != itEnd; it++)
+			vector<shared_ptr<Player> > playersSnapshot;
+			getPlayersSnapshot(playersSnapshot);
+			AUTO_VAR(itEnd, playersSnapshot.end());
+			for (vector<shared_ptr<Player> >::iterator it = playersSnapshot.begin(); it != itEnd; it++)
 			{
 				(*it)->awardStat( GenericStats::timePlayed(), GenericStats::param_time(timeDiff) );
 			}

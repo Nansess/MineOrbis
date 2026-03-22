@@ -33,6 +33,33 @@ CRITICAL_SECTION LevelChunk::m_csSharing;
 CRITICAL_SECTION LevelChunk::m_csTileEntities;
 bool LevelChunk::touchedSky = false;
 
+static void LevelChunkMarkTileEntityRemoved(Level *level, const shared_ptr<TileEntity> &tileEntity, int worldX, int y, int worldZ)
+{
+	if (tileEntity == NULL)
+	{
+		return;
+	}
+
+	int tileId = level->getTile(worldX, y, worldZ);
+	if (tileId > 0 && Tile::tiles[tileId] != NULL && Tile::tiles[tileId]->isEntityTile())
+	{
+		tileEntity->setRemoved();
+		return;
+	}
+
+	if (level->isClientSide)
+	{
+		app.DebugPrintf("LevelChunk::removeTileEntity forcing base TileEntity::setRemoved for stale block tile=%d ptr=%p at %d,%d,%d\n",
+			tileId,
+			tileEntity.get(),
+			worldX,
+			y,
+			worldZ);
+	}
+
+	tileEntity->TileEntity::setRemoved();
+}
+
 void LevelChunk::staticCtor()
 {
 #ifdef SHARING_ENABLED
@@ -1102,7 +1129,7 @@ bool LevelChunk::setTileAndData(int x, int y, int z, int _tile, int _data)
 	}
 	// AP - changed the method of EntityTile detection cos it's well slow on Vita mate
 //	else if (old > 0 && dynamic_cast<EntityTile *>(Tile::tiles[old]) != NULL)
-	else if (old > 0 && Tile::tiles[_tile] != NULL && Tile::tiles[_tile]->isEntityTile())
+	else if (old > 0 && Tile::tiles[old] != NULL && Tile::tiles[old]->isEntityTile())
 	{
 		shared_ptr<TileEntity> te = getTileEntity(x, y, z);
 		if (te != NULL)
@@ -1449,7 +1476,7 @@ void LevelChunk::removeTileEntity(int x, int y, int z)
 				{
 					app.DebugPrintf("Removing tile entity of type %d\n", te->GetType());
 				}
-				te->setRemoved();
+				LevelChunkMarkTileEntityRemoved(level, te, this->x * 16 + x, y, this->z * 16 + z);
 			}
 		}
 		LeaveCriticalSection(&m_csTileEntities);

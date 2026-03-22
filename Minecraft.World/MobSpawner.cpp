@@ -120,12 +120,14 @@ const int MobSpawner::tick(ServerLevel *level, bool spawnEnemies, bool spawnFrie
 	// 4J - rewritten to add chunks interleaved by player, and to add them from the centre outwards. We're going to be
 	// potentially adding less creatures than the original so that our count stays consistent with number of players added, so
 	// we want to make sure as best we can that the ones we do add are near the active players
-	int playerCount = (int)level->players.size();
+	vector<shared_ptr<Player> > playersSnapshot;
+	level->getPlayersSnapshot(playersSnapshot);
+	int playerCount = (int)playersSnapshot.size();
 	int *xx = new int[playerCount];
 	int *zz = new int[playerCount];
 	for (int i = 0; i < playerCount; i++)
 	{
-		shared_ptr<Player> player = level->players[i];
+		shared_ptr<Player> player = playersSnapshot[i];
 		xx[i] = Mth::floor(player->x / 16);
 		zz[i] = Mth::floor(player->z / 16);
 #ifdef __PSVITA__

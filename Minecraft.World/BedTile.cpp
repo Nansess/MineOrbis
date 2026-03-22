@@ -107,8 +107,10 @@ bool BedTile::use(Level *level, int x, int y, int z, shared_ptr<Player> player, 
     if (BedTile::isOccupied(data))
 	{
         shared_ptr<Player> sleepingPlayer = nullptr;
-		AUTO_VAR(itEnd, level->players.end());
-        for (AUTO_VAR(it, level->players.begin()); it != itEnd; it++ )
+		vector<shared_ptr<Player> > playersSnapshot;
+		level->getPlayersSnapshot(playersSnapshot);
+		AUTO_VAR(itEnd, playersSnapshot.end());
+        for (AUTO_VAR(it, playersSnapshot.begin()); it != itEnd; it++ )
 		{
 			shared_ptr<Player> p = *it;
             if (p->isSleeping())

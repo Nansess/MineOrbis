@@ -91,6 +91,7 @@ public:
 
 public:
 	CRITICAL_SECTION				m_entitiesCS;		// 4J added
+	CRITICAL_SECTION				m_playersCS;		// 4J added
 
 	vector<shared_ptr<Entity> > entities;
 
@@ -418,6 +419,7 @@ private:
 public:
 	bool isClientSide;
 
+	void getPlayersSnapshot(vector<shared_ptr<Player> > &playersSnapshot);
 	vector<shared_ptr<Entity> > *getEntities(shared_ptr<Entity> except, AABB *bb);
 	vector<shared_ptr<Entity> > *getEntitiesOfClass(const type_info& baseClass, AABB *bb);
 	shared_ptr<Entity> getClosestEntityOfClass(const type_info& baseClass, AABB *bb, shared_ptr<Entity> source);

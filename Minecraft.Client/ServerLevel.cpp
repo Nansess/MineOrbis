@@ -285,11 +285,13 @@ Biome::MobSpawnerData *ServerLevel::getRandomMobSpawnAt(MobCategory *mobCategory
 
 void ServerLevel::updateSleepingPlayerList()
 {
-	allPlayersSleeping = !players.empty();
+	vector<shared_ptr<Player> > playersSnapshot;
+	getPlayersSnapshot(playersSnapshot);
+	allPlayersSleeping = !playersSnapshot.empty();
 	m_bAtLeastOnePlayerSleeping = false;
 
-	AUTO_VAR(itEnd, players.end());
-	for (vector<shared_ptr<Player> >::iterator it = players.begin(); it != itEnd; it++)
+	AUTO_VAR(itEnd, playersSnapshot.end());
+	for (vector<shared_ptr<Player> >::iterator it = playersSnapshot.begin(); it != itEnd; it++)
 	{
 		if (!(*it)->isSleeping())
 		{
@@ -309,8 +311,10 @@ void ServerLevel::awakenAllPlayers()
 	allPlayersSleeping = false;
 	m_bAtLeastOnePlayerSleeping = false;
 
-	AUTO_VAR(itEnd, players.end());
-	for (vector<shared_ptr<Player> >::iterator it = players.begin(); it != itEnd; it++)
+	vector<shared_ptr<Player> > playersSnapshot;
+	getPlayersSnapshot(playersSnapshot);
+	AUTO_VAR(itEnd, playersSnapshot.end());
+	for (vector<shared_ptr<Player> >::iterator it = playersSnapshot.begin(); it != itEnd; it++)
 	{
 		if ((*it)->isSleeping())
 		{
@@ -333,9 +337,11 @@ bool ServerLevel::allPlayersAreSleeping()
 {
 	if (allPlayersSleeping && !isClientSide)
 	{
+		vector<shared_ptr<Player> > playersSnapshot;
+		getPlayersSnapshot(playersSnapshot);
 		// all players are sleeping, but have they slept long enough?
-		AUTO_VAR(itEnd, players.end());
-		for (vector<shared_ptr<Player> >::iterator it = players.begin(); it != itEnd; it++ )
+		AUTO_VAR(itEnd, playersSnapshot.end());
+		for (vector<shared_ptr<Player> >::iterator it = playersSnapshot.begin(); it != itEnd; it++ )
 		{
 			//                System.out.println(player->entityId + ": " + player->getSleepTimer());
 			if (! (*it)->isSleepingLongEnough())
@@ -567,7 +573,9 @@ void ServerLevel::forceAddTileTick(int x, int y, int z, int tileId, int tickDela
 
 void ServerLevel::tickEntities()
 {
-	if (players.empty())
+	vector<shared_ptr<Player> > playersSnapshot;
+	getPlayersSnapshot(playersSnapshot);
+	if (playersSnapshot.empty())
 	{
 		if (emptyTime++ >= EMPTY_TIME_NO_TICK)
 		{
@@ -1016,8 +1024,10 @@ shared_ptr<Explosion> ServerLevel::explode(shared_ptr<Entity> source, double x, 
 		explosion->toBlow.clear();
 	}
 
+	vector<shared_ptr<Player> > playersSnapshot;
+	getPlayersSnapshot(playersSnapshot);
 	vector<shared_ptr<ServerPlayer> > sentTo;
-	for(AUTO_VAR(it, players.begin()); it != players.end(); ++it)
+	for(AUTO_VAR(it, playersSnapshot.begin()); it != playersSnapshot.end(); ++it)
 	{
 		shared_ptr<ServerPlayer> player = dynamic_pointer_cast<ServerPlayer>(*it);
 		if (player->dimension != dimension->id) continue;
