@@ -33,28 +33,11 @@ CRITICAL_SECTION LevelChunk::m_csSharing;
 CRITICAL_SECTION LevelChunk::m_csTileEntities;
 bool LevelChunk::touchedSky = false;
 
-static void LevelChunkMarkTileEntityRemoved(Level *level, const shared_ptr<TileEntity> &tileEntity, int worldX, int y, int worldZ)
+static void LevelChunkMarkTileEntityRemoved(const shared_ptr<TileEntity> &tileEntity)
 {
 	if (tileEntity == NULL)
 	{
 		return;
-	}
-
-	int tileId = level->getTile(worldX, y, worldZ);
-	if (tileId > 0 && Tile::tiles[tileId] != NULL && Tile::tiles[tileId]->isEntityTile())
-	{
-		tileEntity->setRemoved();
-		return;
-	}
-
-	if (level->isClientSide)
-	{
-		app.DebugPrintf("LevelChunk::removeTileEntity forcing base TileEntity::setRemoved for stale block tile=%d ptr=%p at %d,%d,%d\n",
-			tileId,
-			tileEntity.get(),
-			worldX,
-			y,
-			worldZ);
 	}
 
 	tileEntity->TileEntity::setRemoved();
@@ -1360,6 +1343,32 @@ void LevelChunk::skyBrightnessChanged()
 
 shared_ptr<TileEntity> LevelChunk::getTileEntity(int x, int y, int z)
 {
+    shared_ptr<TileEntity> tileEntity = getExistingTileEntity(x, y, z);
+	if (tileEntity != NULL)
+	{
+		return tileEntity;
+	}
+
+	// Fix for #48450 - All: Code Defect: Hang: Game hangs in tutorial, when player arrive at the particular coordinate
+	// 4J Stu - Chests try to get their neighbours when being destroyed,
+	// which then causes new tile entities to be created if the neighbour has already been destroyed
+	if(level->m_bDisableAddNewTileEntities) return nullptr;
+
+    int t = getTile(x, y, z);
+    if (t <= 0 || !Tile::tiles[t]->isEntityTile()) return nullptr;
+
+	// 4J-PB changed from this in 1.7.3
+	//EntityTile *et = (EntityTile *) Tile::tiles[t];
+    //et->onPlace(level, this->x * 16 + x, y, this->z * 16 + z);
+
+	tileEntity = ((EntityTile *) Tile::tiles[t])->newTileEntity(level);
+	level->setTileEntity(this->x * 16 + x, y, this->z * 16 + z, tileEntity);
+
+    return getExistingTileEntity(x, y, z);
+}
+
+shared_ptr<TileEntity> LevelChunk::getExistingTileEntity(int x, int y, int z)
+{
     TilePos pos(x, y, z);
 
 	// 4J Stu - Changed as we should not be using the [] accessor (causes an insert when we don't want one)
@@ -1367,53 +1376,17 @@ shared_ptr<TileEntity> LevelChunk::getTileEntity(int x, int y, int z)
 	EnterCriticalSection(&m_csTileEntities);
 	shared_ptr<TileEntity> tileEntity = nullptr;
 	AUTO_VAR(it, tileEntities.find(pos));
-
-	if (it == tileEntities.end())
-	{
-		LeaveCriticalSection(&m_csTileEntities);	// Note: don't assume iterator is valid for tileEntities after this point
-
-		// Fix for #48450 - All: Code Defect: Hang: Game hangs in tutorial, when player arrive at the particular coordinate
-		// 4J Stu - Chests try to get their neighbours when being destroyed,
-		// which then causes new tile entities to be created if the neighbour has already been destroyed
-		if(level->m_bDisableAddNewTileEntities) return nullptr;
-
-        int t = getTile(x, y, z);
-        if (t <= 0 || !Tile::tiles[t]->isEntityTile()) return nullptr;
-		
-		// 4J-PB changed from this in 1.7.3
-		//EntityTile *et = (EntityTile *) Tile::tiles[t];
-        //et->onPlace(level, this->x * 16 + x, y, this->z * 16 + z);
-
-		//if (tileEntity == NULL)
-		//{
-			tileEntity = ((EntityTile *) Tile::tiles[t])->newTileEntity(level);
-			level->setTileEntity(this->x * 16 + x, y, this->z * 16 + z, tileEntity);
-		//}
-
-        //tileEntity = tileEntities[pos];		// 4J - TODO - this doesn't seem right - assignment wrong way? Check
-
-		// 4J Stu - It should have been inserted by now, but check to be sure
-		EnterCriticalSection(&m_csTileEntities);
-		AUTO_VAR(newIt, tileEntities.find(pos));
-		if (newIt != tileEntities.end())
-		{
-			tileEntity = newIt->second;
-		}
-		LeaveCriticalSection(&m_csTileEntities);
-    }
-	else
+	if (it != tileEntities.end())
 	{
 		tileEntity = it->second;
-		LeaveCriticalSection(&m_csTileEntities);
+		if (tileEntity != NULL && tileEntity->isRemoved())
+		{
+			tileEntities.erase(it);
+			tileEntity = nullptr;
+		}
 	}
-    if (tileEntity != NULL && tileEntity->isRemoved())
-	{
-		EnterCriticalSection(&m_csTileEntities);
-        tileEntities.erase(pos);
-		LeaveCriticalSection(&m_csTileEntities);
-        return nullptr;
-    }
-	
+	LeaveCriticalSection(&m_csTileEntities);
+
     return tileEntity;
 }
 
@@ -1476,7 +1449,7 @@ void LevelChunk::removeTileEntity(int x, int y, int z)
 				{
 					app.DebugPrintf("Removing tile entity of type %d\n", te->GetType());
 				}
-				LevelChunkMarkTileEntityRemoved(level, te, this->x * 16 + x, y, this->z * 16 + z);
+				LevelChunkMarkTileEntityRemoved(te);
 			}
 		}
 		LeaveCriticalSection(&m_csTileEntities);

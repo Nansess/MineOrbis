@@ -62,32 +62,20 @@ static bool LevelHasUsablePlayerPointer(const shared_ptr<Player> &player)
 	return true;
 }
 
-static void LevelMarkTileEntityRemoved(Level *level, const shared_ptr<TileEntity> &tileEntity, int x, int y, int z, const char *context)
+static void LevelMarkTileEntityRemoved(const shared_ptr<TileEntity> &tileEntity)
 {
 	if (tileEntity == NULL)
 	{
 		return;
 	}
 
-	int tileId = level->getTile(x, y, z);
-	if (tileId > 0 && Tile::tiles[tileId] != NULL && Tile::tiles[tileId]->isEntityTile())
-	{
-		tileEntity->setRemoved();
-		return;
-	}
-
-	if (level->isClientSide)
-	{
-		app.DebugPrintf("%s forcing base TileEntity::setRemoved for stale block tile=%d ptr=%p at %d,%d,%d\n",
-			context,
-			tileId,
-			tileEntity.get(),
-			x,
-			y,
-			z);
-	}
-
+	// back into world lookups while the container state is mid-update.
 	tileEntity->TileEntity::setRemoved();
+}
+
+static bool LevelTileEntityMatchesPosition(const shared_ptr<TileEntity> &tileEntity, int x, int y, int z)
+{
+	return tileEntity != NULL && tileEntity->x == x && tileEntity->y == y && tileEntity->z == z;
 }
 
 // 4J : WESTY : Added for time played stats.
@@ -740,7 +728,9 @@ Level::~Level()
 {
 	delete random;
 	delete dimension;
-	delete chunkSource;
+	ChunkSource *oldChunkSource = chunkSource;
+	chunkSource = NULL;
+	delete oldChunkSource;
 	delete levelData;
 	delete toCheckLevel;
 
@@ -923,13 +913,13 @@ bool Level::reallyHasChunksAt(int x0, int y0, int z0, int x1, int y1, int z1)
 
 bool Level::hasChunk(int x, int z)
 {
-	return this->chunkSource->hasChunk(x, z);
+	return this->chunkSource != NULL && this->chunkSource->hasChunk(x, z);
 }
 
 // 4J added
 bool Level::reallyHasChunk(int x, int z)
 {
-	return this->chunkSource->reallyHasChunk(x, z);
+	return this->chunkSource != NULL && this->chunkSource->reallyHasChunk(x, z);
 }
 
 
@@ -941,7 +931,7 @@ LevelChunk *Level::getChunkAt(int x, int z)
 
 LevelChunk *Level::getChunk(int x, int z)
 {
-	return this->chunkSource->getChunk(x, z);
+	return this->chunkSource != NULL ? this->chunkSource->getChunk(x, z) : NULL;
 }
 
 
@@ -2982,33 +2972,76 @@ void Level::setTileEntity(int x, int y, int z, shared_ptr<TileEntity> tileEntity
 void Level::removeTileEntity(int x, int y, int z)
 {
 	EnterCriticalSection(&m_tileEntityListCS);
-    shared_ptr<TileEntity> te = getTileEntity(x, y, z);
+    shared_ptr<TileEntity> te;
+	bool removedFromLevelLists = false;
+
+	for( AUTO_VAR(it, pendingTileEntities.begin()); it != pendingTileEntities.end(); ++it )
+	{
+		if (LevelTileEntityMatchesPosition(*it, x, y, z))
+		{
+			te = *it;
+			break;
+		}
+	}
+	if (te == NULL)
+	{
+		for( AUTO_VAR(it, tileEntityList.begin()); it != tileEntityList.end(); ++it )
+		{
+			if (LevelTileEntityMatchesPosition(*it, x, y, z))
+			{
+				te = *it;
+				break;
+			}
+		}
+	}
     if (te != NULL && updatingTileEntities)
 	{
-        LevelMarkTileEntityRemoved(this, te, x, y, z, "Level::removeTileEntity");
-		AUTO_VAR(it, find(pendingTileEntities.begin(), pendingTileEntities.end(), te ));
-		if( it != pendingTileEntities.end() )
+        LevelMarkTileEntityRemoved(te);
+		for( AUTO_VAR(it, pendingTileEntities.begin()); it != pendingTileEntities.end(); )
 		{
-			pendingTileEntities.erase(it);
+			if( (*it) == te || LevelTileEntityMatchesPosition(*it, x, y, z) )
+			{
+				it = pendingTileEntities.erase(it);
+			}
+			else
+			{
+				++it;
+			}
 		}
     }
 	else
 	{
-        if (te != NULL)
+		for( AUTO_VAR(it, pendingTileEntities.begin()); it != pendingTileEntities.end(); )
 		{
-			AUTO_VAR(it, find(pendingTileEntities.begin(), pendingTileEntities.end(), te ));
-			if( it != pendingTileEntities.end() )
+			if( (te != NULL && (*it) == te) || LevelTileEntityMatchesPosition(*it, x, y, z) )
 			{
-				pendingTileEntities.erase(it);
+				LevelMarkTileEntityRemoved(*it);
+				it = pendingTileEntities.erase(it);
+				removedFromLevelLists = true;
 			}
-			AUTO_VAR(it2, find(tileEntityList.begin(), tileEntityList.end(), te));
-			if( it2 != tileEntityList.end() )
+			else
 			{
-				tileEntityList.erase(it2);
+				++it;
 			}
-        }
-		LevelChunk *lc = getChunk(x >> 4, z >> 4);
-		if (lc != NULL) lc->removeTileEntity(x & 15, y, z & 15);
+		}
+		for( AUTO_VAR(it, tileEntityList.begin()); it != tileEntityList.end(); )
+		{
+			if( (te != NULL && (*it) == te) || LevelTileEntityMatchesPosition(*it, x, y, z) )
+			{
+				LevelMarkTileEntityRemoved(*it);
+				it = tileEntityList.erase(it);
+				removedFromLevelLists = true;
+			}
+			else
+			{
+				++it;
+			}
+		}
+		if (!removedFromLevelLists)
+		{
+			LevelChunk *lc = getChunk(x >> 4, z >> 4);
+			if (lc != NULL) lc->removeTileEntity(x & 15, y, z & 15);
+		}
 	}
 	LeaveCriticalSection(&m_tileEntityListCS);
 }

@@ -200,6 +200,7 @@ public:
     virtual bool isSkyLit(int x, int y, int z);
     virtual void skyBrightnessChanged();
     virtual shared_ptr<TileEntity> getTileEntity(int x, int y, int z);
+    shared_ptr<TileEntity> getExistingTileEntity(int x, int y, int z);
     virtual void addTileEntity(shared_ptr<TileEntity> te);
     virtual void setTileEntity(int x, int y, int z, shared_ptr<TileEntity> tileEntity);
     virtual void removeTileEntity(int x, int y, int z);
